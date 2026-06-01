@@ -261,13 +261,6 @@ body {
 
 /* --- Milkdown theme overrides --- */
 
-/* Hide Crepe's built-in UI elements (we have our own toolbar) */
-.milkdown .milkdown-toolbar,
-.milkdown .milkdown-top-bar,
-.milkdown .milkdown-block-handle {
-  display: none !important;
-}
-
 [data-theme='light'] .milkdown {
   --crepe-color-background: #ffffff;
   --crepe-color-on-background: #1a1a2e;

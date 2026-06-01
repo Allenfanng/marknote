@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import Editor, { type EditorHandle } from './components/Editor'
 import TitleBar from './components/TitleBar'
 import Toolbar from './components/Toolbar'
@@ -12,6 +13,20 @@ const MD_EXTENSIONS = ['.md', '.markdown', '.txt']
 function isMarkdownFile(path: string): boolean {
   const lower = path.toLowerCase()
   return MD_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
+
+function openFileInNewWindow(filePath: string) {
+  const label = `marknote-${Date.now()}`
+  const url = `/?file=${encodeURIComponent(filePath)}`
+  new WebviewWindow(label, {
+    url,
+    title: filePath.split(/[\\/]/).pop() ?? 'MarkNote',
+    width: 1200,
+    height: 800,
+    minWidth: 600,
+    minHeight: 400,
+    center: true,
+  })
 }
 
 function App() {
@@ -45,6 +60,13 @@ function App() {
       console.error('Failed to load file:', e)
     }
   }, [])
+
+  // On startup, check if this window was opened with a file parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const fileParam = params.get('file')
+    if (fileParam) loadFile(fileParam)
+  }, [loadFile])
 
   const handleOpen = useCallback(async () => {
     try {
@@ -144,7 +166,7 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleSave, handleOpen, handleNew, toggleViewMode])
 
-  // Tauri v2 drag-drop
+  // Tauri v2 drag-drop — open dropped file in a new window
   useEffect(() => {
     const webview = getCurrentWebview()
     const unlistenPromise = webview.onDragDropEvent((event) => {
@@ -153,7 +175,7 @@ function App() {
       } else if (event.payload.type === 'drop') {
         setIsDragging(false)
         const mdFile = event.payload.paths.find(isMarkdownFile)
-        if (mdFile) loadFile(mdFile)
+        if (mdFile) openFileInNewWindow(mdFile)
       } else if (event.payload.type === 'leave') {
         setIsDragging(false)
       }
@@ -161,7 +183,7 @@ function App() {
     return () => {
       unlistenPromise.then((fn) => fn())
     }
-  }, [loadFile])
+  }, [])
 
   return (
     <div className="app">
@@ -194,7 +216,7 @@ function App() {
       )}
       {isDragging && (
         <div className="drop-overlay">
-          <div className="drop-overlay-text">Drop to open file</div>
+          <div className="drop-overlay-text">Drop to open in new window</div>
         </div>
       )}
     </div>

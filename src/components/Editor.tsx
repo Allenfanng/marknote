@@ -88,6 +88,10 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
         'block-edit': false,
         toolbar: false,
         'top-bar': false,
+        'link-tooltip': false,
+      },
+      featureConfigs: {
+        cursor: { virtual: false },
       },
     })
 
