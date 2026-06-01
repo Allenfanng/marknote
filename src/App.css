@@ -261,30 +261,60 @@ body {
 
 /* --- Milkdown theme overrides --- */
 
-[data-theme='light'] .milkdown-classic {
+/* Hide Crepe's built-in toolbar and top bar (we have our own) */
+.milkdown .milkdown-toolbar,
+.milkdown .milkdown-top-bar {
+  display: none !important;
+}
+
+[data-theme='light'] .milkdown {
   --crepe-color-background: #ffffff;
   --crepe-color-on-background: #1a1a2e;
   --crepe-color-surface: #f8f9fa;
+  --crepe-color-surface-low: #f1f3f5;
   --crepe-color-on-surface: #1a1a2e;
-  --crepe-color-surface-variant: #e9ecef;
   --crepe-color-on-surface-variant: #6b7280;
-  --crepe-color-primary: #4a6fa5;
-  --crepe-color-on-primary: #ffffff;
   --crepe-color-outline: #d1d5db;
-  --crepe-color-border: #e5e7eb;
+  --crepe-color-primary: #4a6fa5;
+  --crepe-color-secondary: #dbeafe;
+  --crepe-color-on-secondary: #1e40af;
+  --crepe-color-inverse: #1a1a2e;
+  --crepe-color-on-inverse: #ffffff;
+  --crepe-color-inline-code: #d63384;
+  --crepe-color-error: #dc3545;
+  --crepe-color-hover: #e9ecef;
+  --crepe-color-selected: #dbeafe;
+  --crepe-color-inline-area: #e9ecef;
+  --crepe-font-title: Georgia, Cambria, 'Times New Roman', Times, serif;
+  --crepe-font-default: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --crepe-font-code: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --crepe-shadow-1: 0px 1px 3px 1px rgba(0,0,0,0.1), 0px 1px 2px 0px rgba(0,0,0,0.15);
+  --crepe-shadow-2: 0px 2px 6px 2px rgba(0,0,0,0.1), 0px 1px 2px 0px rgba(0,0,0,0.15);
 }
 
-[data-theme='dark'] .milkdown-classic {
+[data-theme='dark'] .milkdown {
   --crepe-color-background: #1e1e1e;
   --crepe-color-on-background: #d4d4d4;
   --crepe-color-surface: #252526;
+  --crepe-color-surface-low: #2d2d2d;
   --crepe-color-on-surface: #d4d4d4;
-  --crepe-color-surface-variant: #3c3c3c;
   --crepe-color-on-surface-variant: #808080;
+  --crepe-color-outline: #555;
   --crepe-color-primary: #6ba5e7;
-  --crepe-color-on-primary: #ffffff;
-  --crepe-color-outline: #3c3c3c;
-  --crepe-color-border: #3c3c3c;
+  --crepe-color-secondary: #1e3a5f;
+  --crepe-color-on-secondary: #93c5fd;
+  --crepe-color-inverse: #d4d4d4;
+  --crepe-color-on-inverse: #1e1e1e;
+  --crepe-color-inline-code: #f48fb1;
+  --crepe-color-error: #ef9a9a;
+  --crepe-color-hover: #3c3c3c;
+  --crepe-color-selected: #1e3a5f;
+  --crepe-color-inline-area: #333;
+  --crepe-font-title: Georgia, Cambria, 'Times New Roman', Times, serif;
+  --crepe-font-default: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --crepe-font-code: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  --crepe-shadow-1: 0px 1px 3px 1px rgba(0,0,0,0.3), 0px 1px 2px 0px rgba(0,0,0,0.4);
+  --crepe-shadow-2: 0px 2px 6px 2px rgba(0,0,0,0.3), 0px 1px 2px 0px rgba(0,0,0,0.4);
 }
 
 /* --- Scrollbar --- */
