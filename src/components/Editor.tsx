@@ -16,7 +16,6 @@ import {
   isNodeSelectedCommand,
   strongSchema,
   emphasisSchema,
-  headingSchema,
   bulletListSchema,
   orderedListSchema,
   codeBlockSchema,
