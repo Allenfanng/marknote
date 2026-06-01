@@ -261,9 +261,10 @@ body {
 
 /* --- Milkdown theme overrides --- */
 
-/* Hide Crepe's built-in toolbar and top bar (we have our own) */
+/* Hide Crepe's built-in UI elements (we have our own toolbar) */
 .milkdown .milkdown-toolbar,
-.milkdown .milkdown-top-bar {
+.milkdown .milkdown-top-bar,
+.milkdown .milkdown-block-handle {
   display: none !important;
 }
 
