@@ -279,7 +279,7 @@ body {
   --crepe-color-hover: #e9ecef;
   --crepe-color-selected: #dbeafe;
   --crepe-color-inline-area: #e9ecef;
-  --crepe-font-title: Georgia, Cambria, 'Times New Roman', Times, serif;
+  --crepe-font-title: 'LXGW WenKai', '霞鹜文楷', 'Microsoft YaHei UI', '微软雅黑', Georgia, serif;
   --crepe-font-default: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --crepe-font-code: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
   --crepe-shadow-1: 0px 1px 3px 1px rgba(0,0,0,0.1), 0px 1px 2px 0px rgba(0,0,0,0.15);
@@ -304,7 +304,7 @@ body {
   --crepe-color-hover: #3c3c3c;
   --crepe-color-selected: #1e3a5f;
   --crepe-color-inline-area: #333;
-  --crepe-font-title: Georgia, Cambria, 'Times New Roman', Times, serif;
+  --crepe-font-title: 'LXGW WenKai', '霞鹜文楷', 'Microsoft YaHei UI', '微软雅黑', Georgia, serif;
   --crepe-font-default: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --crepe-font-code: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
   --crepe-shadow-1: 0px 1px 3px 1px rgba(0,0,0,0.3), 0px 1px 2px 0px rgba(0,0,0,0.4);
