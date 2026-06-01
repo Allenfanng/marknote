@@ -81,7 +81,15 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
   const crepeRef = useRef<Crepe | null>(null)
 
   const { get } = useEditor((root) => {
-    const crepe = new Crepe({ root, defaultValue })
+    const crepe = new Crepe({
+      root,
+      defaultValue,
+      features: {
+        'block-edit': false,
+        toolbar: false,
+        'top-bar': false,
+      },
+    })
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {
