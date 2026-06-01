@@ -89,6 +89,12 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
         toolbar: false,
         'top-bar': false,
         'link-tooltip': false,
+        'list-item': false,
+        'image-block': false,
+        placeholder: false,
+        'code-mirror': false,
+        table: false,
+        latex: false,
       },
       featureConfigs: {
         cursor: { virtual: false },

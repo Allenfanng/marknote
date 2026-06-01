@@ -41,6 +41,7 @@ function App() {
   const editorRef = useRef<EditorHandle | null>(null)
   const [editorReady, setEditorReady] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+  const [editorKey, setEditorKey] = useState(0)
 
   // Source mode content (separate from WYSIWYG to allow round-trip)
   const [sourceContent, setSourceContent] = useState(content)
@@ -56,6 +57,8 @@ function App() {
       setContent(text)
       setSourceContent(text)
       setIsDirty(false)
+      setEditorReady(false)
+      setEditorKey((k) => k + 1)
     } catch (e) {
       console.error('Failed to load file:', e)
     }
@@ -100,6 +103,8 @@ function App() {
     setContent(initial)
     setSourceContent(initial)
     setIsDirty(false)
+    setEditorReady(false)
+    setEditorKey((k) => k + 1)
   }, [])
 
   const handleEditorChange = useCallback((markdown: string) => {
@@ -124,9 +129,10 @@ function App() {
         setSourceContent(md)
         return 'source'
       } else {
-        // Source -> WYSIWYG: sync content from source
+        // Source -> WYSIWYG: sync content from source, force remount
         setContent(sourceContent)
         setEditorReady(false)
+        setEditorKey((k) => k + 1)
         return 'wysiwyg'
       }
     })
@@ -205,7 +211,7 @@ function App() {
       {viewMode === 'wysiwyg' ? (
         <main className="editor-container">
           <Editor
-            key={content}
+            key={editorKey}
             defaultValue={content}
             onChange={handleEditorChange}
             editorRef={editorRef}
