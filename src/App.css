@@ -349,3 +349,63 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
 }
+
+/* --- About dialog --- */
+
+.about-dialog {
+  border: none;
+  border-radius: 12px;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  max-width: 320px;
+  width: 90vw;
+}
+
+.about-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.about-content {
+  padding: 32px 24px 24px;
+  text-align: center;
+}
+
+.about-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+.about-version {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 0 4px;
+}
+
+.about-date {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 4px;
+}
+
+.about-author {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 24px;
+}
+
+.about-close {
+  padding: 8px 24px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.about-close:hover {
+  background: var(--bg-hover);
+}

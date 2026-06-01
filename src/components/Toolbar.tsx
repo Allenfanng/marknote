@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   FileText,
   FolderOpen,
@@ -15,6 +15,7 @@ import {
   Quote,
   Link,
   Image,
+  Info,
 } from 'lucide-react'
 import type { EditorHandle, ActiveState } from './Editor'
 
@@ -72,7 +73,13 @@ export default function Toolbar({
     if (url) editor.insertImage(url)
   }
 
+  const dialogRef = useRef<HTMLDialogElement>(null)
+
+  const openAbout = () => dialogRef.current?.showModal()
+  const closeAbout = () => dialogRef.current?.close()
+
   return (
+    <>
     <div className="toolbar">
       {/* File group */}
       <button className="toolbar-btn" onClick={onNew} data-tooltip="New (Ctrl+N)">
@@ -196,6 +203,27 @@ export default function Toolbar({
       >
         <Image size={16} />
       </button>
+
+      <div style={{ flex: 1 }} />
+
+      <button
+        className="toolbar-btn"
+        onClick={openAbout}
+        data-tooltip="About"
+      >
+        <Info size={16} />
+      </button>
     </div>
+
+    <dialog ref={dialogRef} className="about-dialog" onClick={(e) => { if (e.target === dialogRef.current) closeAbout() }}>
+      <div className="about-content">
+        <h2 className="about-title">MarkNote</h2>
+        <p className="about-version">v1.1.0</p>
+        <p className="about-date">2026-06-01</p>
+        <p className="about-author">FZ</p>
+        <button className="about-close" onClick={closeAbout}>Close</button>
+      </div>
+    </dialog>
+    </>
   )
 }
