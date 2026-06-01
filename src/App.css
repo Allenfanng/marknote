@@ -311,6 +311,20 @@ body {
   --crepe-shadow-2: 0px 2px 6px 2px rgba(0,0,0,0.3), 0px 1px 2px 0px rgba(0,0,0,0.4);
 }
 
+/* --- Table borders: more visible than Crepe defaults --- */
+
+.milkdown .milkdown-table-block th,
+.milkdown .milkdown-table-block td {
+  border: 1px solid var(--crepe-color-outline);
+  padding: 8px 16px;
+  min-width: 60px;
+}
+
+.milkdown .milkdown-table-block th {
+  background: var(--crepe-color-surface-low);
+  font-weight: 600;
+}
+
 /* --- Scrollbar --- */
 
 ::-webkit-scrollbar {
