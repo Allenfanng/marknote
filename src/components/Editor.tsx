@@ -93,7 +93,6 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
         'image-block': false,
         placeholder: false,
         'code-mirror': false,
-        table: false,
         latex: false,
       },
       featureConfigs: {

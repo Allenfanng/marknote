@@ -325,6 +325,12 @@ body {
   font-weight: 600;
 }
 
+.milkdown .milkdown-table-block .handle,
+.milkdown .milkdown-table-block .cell-handle,
+.milkdown .milkdown-table-block .line-handle {
+  display: none !important;
+}
+
 /* --- Scrollbar --- */
 
 ::-webkit-scrollbar {

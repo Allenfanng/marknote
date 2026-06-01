@@ -33,10 +33,7 @@ function App() {
   const [filePath, setFilePath] = useState<string | null>(null)
   const [content, setContent] = useState('# Welcome to MarkNote\n\nStart typing...\n')
   const [isDirty, setIsDirty] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'
-    return 'light'
-  })
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [viewMode, setViewMode] = useState<'wysiwyg' | 'source'>('wysiwyg')
   const editorRef = useRef<EditorHandle | null>(null)
   const [editorReady, setEditorReady] = useState(false)
