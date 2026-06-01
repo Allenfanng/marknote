@@ -1,22 +1,40 @@
 :root {
   /* Light theme */
   --bg-primary: #ffffff;
-  --bg-secondary: #f5f5f5;
-  --text-primary: #333333;
-  --text-secondary: #666666;
-  --border-color: #e0e0e0;
-  --accent-color: #4a90d9;
+  --bg-secondary: #f8f9fa;
+  --bg-hover: #e9ecef;
+  --text-primary: #1a1a2e;
+  --text-secondary: #6b7280;
+  --border-color: #e5e7eb;
+  --accent-color: #4a6fa5;
+  --toolbar-bg: #f8f9fa;
   --titlebar-bg: #fafafa;
+  --source-bg: #ffffff;
+  --source-text: #1a1a2e;
+  --divider-color: #d1d5db;
+  --active-bg: #dbeafe;
+  --active-text: #1e40af;
+  --drop-overlay-bg: rgba(74, 111, 165, 0.08);
+  --drop-overlay-border: #4a6fa5;
 }
 
 [data-theme='dark'] {
   --bg-primary: #1e1e1e;
   --bg-secondary: #252526;
+  --bg-hover: #3c3c3c;
   --text-primary: #d4d4d4;
   --text-secondary: #808080;
   --border-color: #3c3c3c;
   --accent-color: #6ba5e7;
+  --toolbar-bg: #2d2d2d;
   --titlebar-bg: #2d2d2d;
+  --source-bg: #1e1e1e;
+  --source-text: #d4d4d4;
+  --divider-color: #555;
+  --active-bg: #1e3a5f;
+  --active-text: #93c5fd;
+  --drop-overlay-bg: rgba(107, 165, 231, 0.08);
+  --drop-overlay-border: #6ba5e7;
 }
 
 * {
@@ -45,17 +63,19 @@ body {
   height: 100vh;
 }
 
-/* TitleBar */
+/* --- TitleBar --- */
+
 .titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 40px;
-  padding: 0 16px;
+  height: 38px;
+  padding: 0 12px;
   background: var(--titlebar-bg);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
   user-select: none;
+  -webkit-app-region: drag;
 }
 
 .titlebar-title {
@@ -77,25 +97,110 @@ body {
 
 .titlebar-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
+  -webkit-app-region: no-drag;
 }
 
-.titlebar-actions button {
+.titlebar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
   background: none;
-  border: 1px solid var(--border-color);
+  border: none;
   border-radius: 4px;
-  padding: 4px 10px;
-  color: var(--text-primary);
+  color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
-.titlebar-actions button:hover {
-  background: var(--bg-secondary);
+.titlebar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
-/* Editor area */
+.titlebar-btn.active {
+  background: var(--active-bg);
+  color: var(--active-text);
+}
+
+/* --- Toolbar --- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 8px;
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--divider-color);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.12s, color 0.12s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.toolbar-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.toolbar-btn.active {
+  background: var(--active-bg);
+  color: var(--active-text);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.toolbar-btn[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: 11px;
+  font-weight: 400;
+  border-radius: 4px;
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
+}
+
+/* --- Editor area --- */
+
 .editor-container {
   flex: 1;
   overflow-y: auto;
@@ -103,7 +208,72 @@ body {
   background: var(--bg-primary);
 }
 
-/* Dark mode: override Crepe classic theme for dark */
+/* --- Source View --- */
+
+.source-view {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--source-bg);
+}
+
+.source-textarea {
+  width: 100%;
+  height: 100%;
+  padding: 24px 48px;
+  background: var(--source-bg);
+  color: var(--source-text);
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  tab-size: 2;
+}
+
+.source-textarea::placeholder {
+  color: var(--text-secondary);
+}
+
+/* --- Drag-drop overlay --- */
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--drop-overlay-bg);
+  border: 3px dashed var(--drop-overlay-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.drop-overlay-text {
+  padding: 16px 32px;
+  background: var(--bg-primary);
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--accent-color);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+/* --- Milkdown theme overrides --- */
+
+[data-theme='light'] .milkdown-classic {
+  --crepe-color-background: #ffffff;
+  --crepe-color-on-background: #1a1a2e;
+  --crepe-color-surface: #f8f9fa;
+  --crepe-color-on-surface: #1a1a2e;
+  --crepe-color-surface-variant: #e9ecef;
+  --crepe-color-on-surface-variant: #6b7280;
+  --crepe-color-primary: #4a6fa5;
+  --crepe-color-on-primary: #ffffff;
+  --crepe-color-outline: #d1d5db;
+  --crepe-color-border: #e5e7eb;
+}
+
 [data-theme='dark'] .milkdown-classic {
   --crepe-color-background: #1e1e1e;
   --crepe-color-on-background: #d4d4d4;
@@ -117,7 +287,8 @@ body {
   --crepe-color-border: #3c3c3c;
 }
 
-/* Scrollbar styling */
+/* --- Scrollbar --- */
+
 ::-webkit-scrollbar {
   width: 8px;
 }
