@@ -1,21 +1,21 @@
+import { Moon, Sun, Code2 } from 'lucide-react'
+
 interface TitleBarProps {
   filePath: string | null
   isDirty: boolean
-  onOpen: () => void
-  onSave: () => void
-  onNew: () => void
   theme: 'light' | 'dark'
   onToggleTheme: () => void
+  viewMode: 'wysiwyg' | 'source'
+  onToggleViewMode: () => void
 }
 
 export default function TitleBar({
   filePath,
   isDirty,
-  onOpen,
-  onSave,
-  onNew,
   theme,
   onToggleTheme,
+  viewMode,
+  onToggleViewMode,
 }: TitleBarProps) {
   const fileName = filePath
     ? filePath.split(/[\\/]/).pop()
@@ -28,11 +28,19 @@ export default function TitleBar({
         {isDirty && <span className="dirty-dot" />}
       </div>
       <div className="titlebar-actions">
-        <button onClick={onNew} title="New (Ctrl+N)">New</button>
-        <button onClick={onOpen} title="Open (Ctrl+O)">Open</button>
-        <button onClick={onSave} title="Save (Ctrl+S)">Save</button>
-        <button onClick={onToggleTheme} title="Toggle theme">
-          {theme === 'light' ? '🌙' : '☀️'}
+        <button
+          className={`titlebar-btn ${viewMode === 'source' ? 'active' : ''}`}
+          onClick={onToggleViewMode}
+          title="Source code (Ctrl+/)"
+        >
+          <Code2 size={16} />
+        </button>
+        <button
+          className="titlebar-btn"
+          onClick={onToggleTheme}
+          title="Toggle theme"
+        >
+          {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
         </button>
       </div>
     </div>
