@@ -284,10 +284,7 @@ function App() {
   }, [])
 
   const handleEditorChange = useCallback((markdown: string) => {
-    if (justLoadedRef.current) {
-      updateTab(activeTabIdRef.current, { content: markdown })
-      return
-    }
+    if (justLoadedRef.current) return
     updateTab(activeTabIdRef.current, { content: markdown, isDirty: true })
   }, [updateTab])
 
