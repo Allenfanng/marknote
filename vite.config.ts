@@ -25,4 +25,21 @@ export default defineConfig({
     },
   },
   envPrefix: ['VITE_', 'TAURI_'],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'vendor-react'
+          }
+          if (id.includes('node_modules/@milkdown')) {
+            return 'vendor-milkdown'
+          }
+          if (id.includes('node_modules/lucide-react')) {
+            return 'vendor-lucide'
+          }
+        },
+      },
+    },
+  },
 })

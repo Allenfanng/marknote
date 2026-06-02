@@ -16,6 +16,8 @@ import {
   Link,
   Image,
   Info,
+  PanelLeftOpen,
+  Download,
 } from 'lucide-react'
 import type { EditorHandle, ActiveState } from './Editor'
 
@@ -25,6 +27,10 @@ interface ToolbarProps {
   onNew: () => void
   onOpen: () => void
   onSave: () => void
+  sidebarOpen: boolean
+  onToggleSidebar: () => void
+  onExportHtml: () => void
+  onExportPdf: () => void
 }
 
 const defaultActive: ActiveState = {
@@ -44,8 +50,14 @@ export default function Toolbar({
   onNew,
   onOpen,
   onSave,
+  sidebarOpen,
+  onToggleSidebar,
+  onExportHtml,
+  onExportPdf,
 }: ToolbarProps) {
   const [active, setActive] = useState<ActiveState>(defaultActive)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!editor || disabled) return
@@ -58,6 +70,18 @@ export default function Toolbar({
     }, 250)
     return () => clearInterval(id)
   }, [editor, disabled])
+
+  // Close export menu on outside click
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const handleClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [exportMenuOpen])
 
   const fmtDisabled = disabled || !editor
 
@@ -81,6 +105,17 @@ export default function Toolbar({
   return (
     <>
     <div className="toolbar">
+      {/* Sidebar toggle */}
+      <button
+        className={`toolbar-btn ${sidebarOpen ? 'active' : ''}`}
+        onClick={onToggleSidebar}
+        data-tooltip="Toggle sidebar"
+      >
+        <PanelLeftOpen size={16} />
+      </button>
+
+      <div className="toolbar-divider" />
+
       {/* File group */}
       <button className="toolbar-btn" onClick={onNew} data-tooltip="New (Ctrl+N)">
         <FileText size={16} />
@@ -206,6 +241,27 @@ export default function Toolbar({
 
       <div style={{ flex: 1 }} />
 
+      {/* Export dropdown */}
+      <div className="export-group" ref={exportMenuRef}>
+        <button
+          className="toolbar-btn"
+          onClick={() => setExportMenuOpen((v) => !v)}
+          data-tooltip="Export"
+        >
+          <Download size={16} />
+        </button>
+        {exportMenuOpen && (
+          <div className="export-menu">
+            <button className="export-menu-item" onClick={() => { onExportHtml(); setExportMenuOpen(false) }}>
+              Export HTML
+            </button>
+            <button className="export-menu-item" onClick={() => { onExportPdf(); setExportMenuOpen(false) }}>
+              Export PDF
+            </button>
+          </div>
+        )}
+      </div>
+
       <button
         className="toolbar-btn"
         onClick={openAbout}
@@ -218,8 +274,8 @@ export default function Toolbar({
     <dialog ref={dialogRef} className="about-dialog" onClick={(e) => { if (e.target === dialogRef.current) closeAbout() }}>
       <div className="about-content">
         <h2 className="about-title">MarkNote</h2>
-        <p className="about-version">v1.1.0</p>
-        <p className="about-date">2026-06-01</p>
+        <p className="about-version">v1.2.1</p>
+        <p className="about-date">2026-06-02</p>
         <p className="about-author">FZ</p>
         <button className="about-close" onClick={closeAbout}>Close</button>
       </div>

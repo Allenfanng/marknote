@@ -16,6 +16,10 @@
   --active-text: #1e40af;
   --drop-overlay-bg: rgba(74, 111, 165, 0.08);
   --drop-overlay-border: #4a6fa5;
+  --sidebar-bg: #f8f9fa;
+  --sidebar-item-hover: #e9ecef;
+  --sidebar-item-active: #dbeafe;
+  --status-bg: rgba(248, 249, 250, 0.9);
 }
 
 [data-theme='dark'] {
@@ -35,6 +39,10 @@
   --active-text: #93c5fd;
   --drop-overlay-bg: rgba(107, 165, 231, 0.08);
   --drop-overlay-border: #6ba5e7;
+  --sidebar-bg: #252526;
+  --sidebar-item-hover: #3c3c3c;
+  --sidebar-item-active: #1e3a5f;
+  --status-bg: rgba(37, 37, 38, 0.9);
 }
 
 * {
@@ -63,42 +71,128 @@ body {
   height: 100vh;
 }
 
-/* --- TitleBar --- */
+/* --- TabBar --- */
 
-.titlebar {
+.tab-bar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-end;
   height: 38px;
-  padding: 0 12px;
   background: var(--titlebar-bg);
   border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
-  user-select: none;
   -webkit-app-region: drag;
+  user-select: none;
+  padding: 0 4px 0 8px;
+  flex-shrink: 0;
 }
 
-.titlebar-title {
+.tab-bar-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  flex: 1;
+  overflow-x: auto;
+  -webkit-app-region: no-drag;
+}
+
+.tab-bar-tabs::-webkit-scrollbar {
+  height: 0;
+}
+
+.tab-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  height: 32px;
+  padding: 0 10px 0 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
   color: var(--text-secondary);
-  font-weight: 500;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 180px;
+  min-width: 80px;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
 }
 
-.dirty-dot {
-  width: 8px;
-  height: 8px;
+.tab-item:hover {
+  background: var(--bg-hover);
+}
+
+.tab-item.active {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--bg-primary);
+  margin-bottom: -1px;
+  padding-bottom: 1px;
+}
+
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-dirty-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--accent-color);
-  display: inline-block;
+  flex-shrink: 0;
 }
 
-.titlebar-actions {
+.tab-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.tab-item:hover .tab-close {
+  display: flex;
+}
+
+.tab-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tab-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.tab-new:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tab-bar-actions {
   display: flex;
   gap: 2px;
   -webkit-app-region: no-drag;
+  margin-bottom: 2px;
 }
 
 .titlebar-btn {
@@ -136,7 +230,7 @@ body {
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
   gap: 2px;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .toolbar-divider {
@@ -199,6 +293,133 @@ body {
   pointer-events: none;
 }
 
+/* --- Main area (sidebar + editor) --- */
+
+.main-area {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* --- Sidebar --- */
+
+.sidebar {
+  width: 240px;
+  min-width: 240px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.sidebar-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-tab:hover {
+  background: var(--sidebar-item-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-tab.active {
+  color: var(--accent-color);
+  border-bottom: 2px solid var(--accent-color);
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.sidebar-error {
+  padding: 12px 16px;
+  color: #dc3545;
+  font-size: 12px;
+}
+
+.sidebar-empty {
+  padding: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
+.sidebar-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: background 0.12s;
+}
+
+.sidebar-file-item:hover {
+  background: var(--sidebar-item-hover);
+}
+
+.sidebar-file-item.current {
+  background: var(--sidebar-item-active);
+  color: var(--active-text);
+}
+
+.sidebar-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Status Bar --- */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 24px;
+  padding: 0 12px;
+  background: var(--status-bg);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  gap: 6px;
+  user-select: none;
+}
+
+.status-divider {
+  color: var(--border-color);
+}
+
 /* --- Editor area --- */
 
 .editor-container {
@@ -206,6 +427,35 @@ body {
   overflow-y: auto;
   padding: 20px 0;
   background: var(--bg-primary);
+  position: relative;
+}
+
+.editor-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+  gap: 12px;
+  font-size: 13px;
+  position: absolute;
+  inset: 0;
+  background: var(--bg-primary);
+  z-index: 10;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* --- Source View --- */
@@ -257,6 +507,43 @@ body {
   font-weight: 500;
   color: var(--accent-color);
   box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+/* --- Export menu --- */
+
+.export-group {
+  position: relative;
+}
+
+.export-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 200;
+  min-width: 120px;
+  padding: 4px 0;
+}
+
+.export-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.export-menu-item:hover {
+  background: var(--bg-hover);
 }
 
 /* --- Milkdown theme overrides --- */
@@ -408,4 +695,61 @@ body {
 
 .about-close:hover {
   background: var(--bg-hover);
+}
+
+/* --- Close confirm dialog --- */
+
+.close-confirm-dialog {
+  border: none;
+  border-radius: 10px;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  max-width: 360px;
+  width: 90vw;
+}
+
+.close-confirm-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.close-confirm-content {
+  padding: 24px;
+}
+
+.close-confirm-content p {
+  margin: 0 0 20px;
+  font-size: 14px;
+}
+
+.close-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.close-confirm-btn {
+  padding: 6px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.close-confirm-btn:hover {
+  background: var(--bg-hover);
+}
+
+.close-confirm-btn.primary {
+  background: var(--accent-color);
+  color: #fff;
+  border-color: var(--accent-color);
+}
+
+.close-confirm-btn.primary:hover {
+  opacity: 0.9;
 }
