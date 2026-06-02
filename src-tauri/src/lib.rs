@@ -1,6 +1,6 @@
 use std::fs;
 use rfd::AsyncFileDialog;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
 
 #[tauri::command]
 async fn read_file(path: String) -> Result<String, String> {
@@ -134,10 +134,6 @@ async fn export_html(markdown: String, css: String) -> Result<(), String> {
     }
 }
 
-fn emit_file_opened(app: &tauri::AppHandle, path: String) {
-    let _ = app.emit("file-opened", path);
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -160,10 +156,9 @@ pub fn run() {
                 if lower.ends_with(".md") || lower.ends_with(".markdown") {
                     if std::path::Path::new(&path).exists() {
                         let app_handle = app.handle().clone();
-                        // Delay emit to allow frontend to set up listener
-                        std::thread::spawn(move || {
-                            std::thread::sleep(std::time::Duration::from_millis(500));
-                            emit_file_opened(&app_handle, path);
+                        // Wait for frontend-ready event instead of fixed delay
+                        app.once("frontend-ready", move |_| {
+                            let _ = app_handle.emit("file-opened", path);
                         });
                         break;
                     }

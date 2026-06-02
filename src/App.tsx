@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, emit } from '@tauri-apps/api/event'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
-import Editor, { type EditorHandle } from './components/Editor'
+import type { EditorHandle } from './components/Editor'
 import TabBar, { type Tab } from './components/TabBar'
 import Toolbar from './components/Toolbar'
 import SourceView from './components/SourceView'
@@ -45,6 +45,18 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; tabName: string } | null>(null)
   const justLoadedRef = useRef(true)
+  const [EditorModule, setEditorModule] = useState<React.ComponentType<{
+    defaultValue: string
+    onChange: (markdown: string) => void
+    editorRef: React.RefObject<EditorHandle | null>
+  }> | null>(null)
+
+  // Lazy-load Editor after mount and show window once rendered
+  useEffect(() => {
+    import('./components/Editor').then((mod) => {
+      setEditorModule(() => mod.default)
+    })
+  }, [])
 
   const tabsRef = useRef(tabs)
   const activeTabIdRef = useRef(activeTabId)
@@ -53,6 +65,7 @@ function App() {
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0]
+
 
   const updateTab = useCallback((tabId: string, updates: Partial<Tab>) => {
     setTabs((prev) =>
@@ -105,6 +118,7 @@ function App() {
     const unlisten = listen<string>('file-opened', (event) => {
       loadFile(event.payload)
     })
+    emit('frontend-ready')
     return () => { unlisten.then((fn) => fn()) }
   }, [loadFile])
 
@@ -440,12 +454,14 @@ function App() {
                 />
               )}
               <div style={editorReady ? undefined : { position: 'absolute', opacity: 0, pointerEvents: 'none' }}>
-                <Editor
-                  key={editorKey}
-                  defaultValue={activeTab.content}
-                  onChange={handleEditorChange}
-                  editorRef={editorRef}
-                />
+                {EditorModule && (
+                  <EditorModule
+                    key={editorKey}
+                    defaultValue={activeTab.content}
+                    onChange={handleEditorChange}
+                    editorRef={editorRef}
+                  />
+                )}
               </div>
             </main>
           ) : (

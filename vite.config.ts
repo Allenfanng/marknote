@@ -32,9 +32,8 @@ export default defineConfig({
           if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
             return 'vendor-react'
           }
-          if (id.includes('node_modules/@milkdown')) {
-            return 'vendor-milkdown'
-          }
+          // Milkdown is lazy-loaded — keep it in the async Editor chunk,
+          // not a shared chunk that would block first paint.
           if (id.includes('node_modules/lucide-react')) {
             return 'vendor-lucide'
           }
