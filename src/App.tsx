@@ -1,8 +1,9 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
-import Editor, { type EditorHandle } from './components/Editor'
+import type { EditorHandle } from './components/Editor'
+const Editor = lazy(() => import('./components/Editor'))
 import TabBar, { type Tab } from './components/TabBar'
 import Toolbar from './components/Toolbar'
 import SourceView from './components/SourceView'
@@ -436,18 +437,14 @@ function App() {
         <div className="editor-wrapper">
           {activeTab.viewMode === 'wysiwyg' ? (
             <main className="editor-container">
-              {!editorReady && (
-                <div className="editor-loading">
-                  <div className="spinner" />
-                  <span>Loading...</span>
-                </div>
-              )}
-              <Editor
-                key={editorKey}
-                defaultValue={activeTab.content}
-                onChange={handleEditorChange}
-                editorRef={editorRef}
-              />
+              <Suspense fallback={<div className="editor-loading"><div className="spinner" /><span>Loading editor...</span></div>}>
+                <Editor
+                  key={editorKey}
+                  defaultValue={activeTab.content}
+                  onChange={handleEditorChange}
+                  editorRef={editorRef}
+                />
+              </Suspense>
             </main>
           ) : (
             <SourceView value={activeTab.sourceContent} onChange={handleSourceChange} />
