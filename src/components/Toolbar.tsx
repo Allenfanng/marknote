@@ -274,7 +274,7 @@ export default function Toolbar({
     <dialog ref={dialogRef} className="about-dialog" onClick={(e) => { if (e.target === dialogRef.current) closeAbout() }}>
       <div className="about-content">
         <h2 className="about-title">MarkNote</h2>
-        <p className="about-version">v1.2.2</p>
+        <p className="about-version">v1.2.3</p>
         <p className="about-author">作者：FZ</p>
         <button className="about-close" onClick={closeAbout}>Close</button>
       </div>
