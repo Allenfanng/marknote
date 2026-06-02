@@ -276,6 +276,7 @@ export default function Toolbar({
         <h2 className="about-title">MarkNote</h2>
         <p className="about-version">v1.2.3</p>
         <p className="about-author">作者：FZ</p>
+        <p className="about-contact">联系邮箱：fung9108@163.com</p>
         <button className="about-close" onClick={closeAbout}>Close</button>
       </div>
     </dialog>

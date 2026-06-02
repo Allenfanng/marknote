@@ -669,16 +669,16 @@ body {
   margin: 0 0 4px;
 }
 
-.about-date {
-  font-size: 13px;
-  color: var(--text-secondary);
-  margin: 0 0 4px;
-}
-
 .about-author {
   font-size: 14px;
   font-weight: 600;
-  margin: 16px 0 24px;
+  margin: 12px 0 4px;
+}
+
+.about-contact {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 20px;
 }
 
 .about-close {
