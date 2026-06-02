@@ -27,12 +27,18 @@ function countStats(text: string): { chars: number; words: number } {
 
 export default function StatusBar({ content }: StatusBarProps) {
   const stats = useMemo(() => countStats(content), [content])
+  const startupMs = useMemo(() => {
+    const start = (window as any).__appStart as number | undefined
+    return start ? Math.round(performance.now() - start) : 0
+  }, [])
 
   return (
     <div className="status-bar">
       <span className="status-item">字符: {stats.chars}</span>
       <span className="status-divider">|</span>
       <span className="status-item">词数: {stats.words}</span>
+      <span className="status-divider">|</span>
+      <span className="status-item">软件启动时间：{startupMs}ms</span>
     </div>
   )
 }

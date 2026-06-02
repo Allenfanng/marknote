@@ -134,6 +134,35 @@ async fn export_html(markdown: String, css: String) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+async fn export_pdf(markdown: String, css: String) -> Result<(), String> {
+    let html = format!(r#"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarkNote Export</title>
+<style>
+{css}
+@media print {{
+  body {{ margin: 0; }}
+}}
+</style>
+</head>
+<body>
+<div class="markdown-body">
+{markdown}
+</div>
+</body>
+</html>"#);
+    let tmp_dir = std::env::temp_dir().join("marknote-export");
+    fs::create_dir_all(&tmp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    let file_path = tmp_dir.join("document.html");
+    fs::write(&file_path, &html).map_err(|e| format!("Failed to write HTML: {}", e))?;
+    open::that(&file_path).map_err(|e| format!("Failed to open browser: {}", e))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -146,6 +175,7 @@ pub fn run() {
             get_recent_files,
             add_recent_file,
             export_html,
+            export_pdf,
         ])
         .setup(|app| {
             // Check for file path in CLI args (file association on Windows)

@@ -115,11 +115,16 @@ function App() {
 
   // Listen for file-opened event (file association / OS open)
   useEffect(() => {
-    const unlisten = listen<string>('file-opened', (event) => {
-      loadFile(event.payload)
-    })
-    emit('frontend-ready')
-    return () => { unlisten.then((fn) => fn()) }
+    let unlisten: Promise<() => void>
+    async function setup() {
+      const fn = await listen<string>('file-opened', (event) => {
+        loadFile(event.payload)
+      })
+      unlisten = Promise.resolve(fn)
+      emit('frontend-ready')
+    }
+    setup()
+    return () => { unlisten!.then((fn) => fn()) }
   }, [loadFile])
 
   const handleExportHtml = useCallback(async () => {
@@ -137,28 +142,18 @@ function App() {
     }
   }, [])
 
-  const handleExportPdf = useCallback(() => {
-    const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
-    if (!tab) return
-    const md = tab.viewMode === 'wysiwyg' && editorRef.current?.ready
-      ? editorRef.current.getMarkdown()
-      : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
-    const html = markdownToHtml(md)
-    const css = getExportCss()
-    const fullHtml = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<title>MarkNote Export</title>
-<style>${css}</style>
-</head>
-<body><div class="markdown-body">${html}</div></body>
-</html>`
-    const blob = new Blob([fullHtml], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    const win = window.open(url, '_blank')
-    if (win) {
-      win.onload = () => { win.print() }
+  const handleExportPdf = useCallback(async () => {
+    try {
+      const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
+      if (!tab) return
+      const md = tab.viewMode === 'wysiwyg' && editorRef.current?.ready
+        ? editorRef.current.getMarkdown()
+        : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
+      const html = markdownToHtml(md)
+      const css = getExportCss()
+      await invoke('export_pdf', { markdown: html, css })
+    } catch (e) {
+      console.error('Export PDF failed:', e)
     }
   }, [])
 
