@@ -177,6 +177,17 @@ pub fn run() {
             export_html,
             export_pdf,
         ])
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            for arg in argv.iter() {
+                let lower = arg.to_lowercase();
+                if lower.ends_with(".md") || lower.ends_with(".markdown") {
+                    if std::path::Path::new(arg).exists() {
+                        let _ = app.emit("file-opened", arg.clone());
+                        break;
+                    }
+                }
+            }
+        }))
         .setup(|app| {
             // Check for file path in CLI args (file association on Windows)
             let args: Vec<String> = std::env::args().collect();

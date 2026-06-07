@@ -13,6 +13,8 @@ import './App.css'
 const MD_EXTENSIONS = ['.md', '.markdown', '.txt']
 const AUTO_SAVE_INTERVAL = 3 * 60 * 1000
 
+let isFirstStartupFileOpen = true
+
 let tabIdCounter = 0
 function nextTabId() { return `tab-${++tabIdCounter}` }
 
@@ -92,13 +94,28 @@ function App() {
   const loadFile = useCallback(async (path: string) => {
     try {
       const text = await invoke<string>('read_file', { path })
-      const newTab = createTab({
-        filePath: path,
-        content: text,
-        sourceContent: text,
+      let targetTabId: string
+      setTabs((prev) => {
+        const soleTab = prev.length === 1 ? prev[0] : null
+        if (
+          isFirstStartupFileOpen &&
+          soleTab &&
+          soleTab.filePath === null &&
+          !soleTab.isDirty
+        ) {
+          isFirstStartupFileOpen = false
+          targetTabId = soleTab.id
+          return [{ ...soleTab, filePath: path, content: text, sourceContent: text }]
+        }
+        const newTab = createTab({
+          filePath: path,
+          content: text,
+          sourceContent: text,
+        })
+        targetTabId = newTab.id
+        return [...prev, newTab]
       })
-      setTabs((prev) => [...prev, newTab])
-      setActiveTabId(newTab.id)
+      setActiveTabId(targetTabId!)
       resetEditor()
       invoke('add_recent_file', { path }).catch(console.error)
     } catch (e) {
@@ -311,7 +328,7 @@ function App() {
       const md = editorRef.current?.getMarkdown() ?? tab.content
       updateTab(tab.id, { viewMode: 'source', sourceContent: md })
     } else {
-      updateTab(tab.id, { viewMode: 'wysiwyg' })
+      updateTab(tab.id, { viewMode: 'wysiwyg', content: tab.sourceContent })
       resetEditor()
     }
   }, [updateTab, resetEditor])
@@ -509,6 +526,8 @@ function markdownToHtml(md: string): string {
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // Horizontal rule (must run before bold/italic to prevent *** from partial match)
+    .replace(/^(\-{3,}|\*{3,}|_{3,})[ \t]*$/gm, '<hr />')
     // Bold
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     // Italic
@@ -517,8 +536,6 @@ function markdownToHtml(md: string): string {
     .replace(/~~([^~]+)~~/g, '<del>$1</del>')
     // Blockquote
     .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-    // Horizontal rule
-    .replace(/^---$/gm, '<hr />')
     // Unordered list
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     // Ordered list

@@ -1,7 +1,7 @@
 {
   "name": "marknote",
   "private": true,
-  "version": "1.2.3",
+  "version": "1.2.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build && node scripts/copy-release.mjs"
   },
   "dependencies": {
     "@milkdown/crepe": "^7.21.1",
