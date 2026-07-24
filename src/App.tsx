@@ -132,16 +132,28 @@ function App() {
 
   // Listen for file-opened event (file association / OS open)
   useEffect(() => {
-    let unlisten: Promise<() => void>
+    let unlisten: (() => void) | undefined
+    let cancelled = false
     async function setup() {
-      const fn = await listen<string>('file-opened', (event) => {
-        loadFile(event.payload)
-      })
-      unlisten = Promise.resolve(fn)
-      emit('frontend-ready')
+      try {
+        const fn = await listen<string>('file-opened', (event) => {
+          loadFile(event.payload)
+        })
+        if (!cancelled) {
+          unlisten = fn
+        } else {
+          fn()
+        }
+        await emit('frontend-ready')
+      } catch (e) {
+        console.error('Failed to setup file-opened listener:', e)
+      }
     }
     setup()
-    return () => { unlisten!.then((fn) => fn()) }
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
   }, [loadFile])
 
   const handleExportHtml = useCallback(async () => {

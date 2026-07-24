@@ -34,7 +34,12 @@ export default function TabBar({
 }: TabBarProps) {
   return (
     <div className="tab-bar">
-      <div className="tab-bar-tabs">
+      <div
+        className="tab-bar-tabs"
+        onWheel={(e) => {
+          e.currentTarget.scrollLeft += e.deltaY
+        }}
+      >
         {tabs.map((tab) => {
           const fileName = tab.filePath
             ? tab.filePath.split(/[\\/]/).pop()

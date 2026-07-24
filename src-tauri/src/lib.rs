@@ -182,6 +182,10 @@ pub fn run() {
                 let lower = arg.to_lowercase();
                 if lower.ends_with(".md") || lower.ends_with(".markdown") {
                     if std::path::Path::new(arg).exists() {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
                         let _ = app.emit("file-opened", arg.clone());
                         break;
                     }

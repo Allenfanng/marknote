@@ -1,50 +1,45 @@
-import { readdirSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const projectRoot = resolve(__dirname, '..')
-const bundleDir = resolve(projectRoot, 'src-tauri', 'target', 'release', 'bundle')
-const releaseDir = resolve(projectRoot, '..', 'release')
+const projectRoot = join(__dirname, '..')
+const targetDir = join(projectRoot, 'src-tauri', 'target', 'release')
 
-if (!existsSync(bundleDir)) {
-  console.log('Bundle directory not found, skipping copy.')
-  process.exit(0)
-}
+const releaseRoot = join(projectRoot, '..', 'release')
+if (!existsSync(releaseRoot)) mkdirSync(releaseRoot, { recursive: true })
 
-if (!existsSync(releaseDir)) {
-  mkdirSync(releaseDir, { recursive: true })
-}
+const pkg = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf-8'))
+const version = pkg.version
 
-const dirs = [
-  { subdir: 'msi', pattern: /\.msi$/ },
-  { subdir: 'nsis', pattern: /-setup\.exe$/ },
-]
-
-for (const { subdir, pattern } of dirs) {
-  const sourceDir = resolve(bundleDir, subdir)
-  if (!existsSync(sourceDir)) {
-    console.log(`  ${subdir}/ not found, skipping.`)
-    continue
-  }
-  const files = readdirSync(sourceDir).filter((f) => pattern.test(f))
-  for (const file of files) {
-    const src = resolve(sourceDir, file)
-    const dest = resolve(releaseDir, file)
-    copyFileSync(src, dest)
-    console.log(`  copied: ${file}`)
+// Clean old release files before copying
+for (const old of readdirSync(releaseRoot)) {
+  if (old.startsWith('MarkNote_') || old.startsWith('marknote_')) {
+    unlinkSync(join(releaseRoot, old))
   }
 }
 
-// Copy portable exe from target/release/
-const portableExe = resolve(projectRoot, 'src-tauri', 'target', 'release', 'marknote.exe')
-if (existsSync(portableExe)) {
-  const destName = `MarkNote_${process.env.npm_package_version || 'portable'}_x64.exe`
-  const dest = resolve(releaseDir, destName)
-  copyFileSync(portableExe, dest)
-  console.log(`  copied: ${destName}`)
-} else {
-  console.log('  portable exe not found, skipping.')
+// Portable exe
+const exePath = join(targetDir, 'marknote.exe')
+if (existsSync(exePath)) {
+  const dest = join(releaseRoot, `marknote_${version}_portable.exe`)
+  copyFileSync(exePath, dest)
+  console.log(`Copied: marknote_${version}_portable.exe`)
 }
 
-console.log('Done. Release artifacts synced to /release.')
+// Bundle files (msi + nsis installer) — only current version
+const bundleDir = join(targetDir, 'bundle')
+if (existsSync(bundleDir)) {
+  for (const dir of ['msi', 'nsis']) {
+    const d = join(bundleDir, dir)
+    if (!existsSync(d)) continue
+    for (const f of readdirSync(d)) {
+      if (f.includes(version)) {
+        copyFileSync(join(d, f), join(releaseRoot, f))
+        console.log(`Copied: ${f}`)
+      }
+    }
+  }
+}
+
+console.log('Release files synced successfully.')

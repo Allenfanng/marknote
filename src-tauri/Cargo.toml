@@ -1,6 +1,6 @@
 [package]
 name = "marknote"
-version = "1.2.4"
+version = "1.2.5"
 description = "A Typora-like Markdown editor"
 authors = ["Allen"]
 license = ""
