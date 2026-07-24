@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 
 interface StatusBarProps {
   content: string
+  fontSize: number
 }
 
 function countStats(text: string): { chars: number; words: number } {
@@ -16,16 +17,16 @@ function countStats(text: string): { chars: number; words: number } {
   const chars = clean.replace(/\s/g, '').length
 
   // Word count: CJK characters counted individually, English words by spaces
-  const cjkMatch = clean.match(/[一-鿿㐀-䶿豈-﫿]/g)
+  const cjkMatch = clean.match(/[一-鿿㐀-䶿豈-﫿]/g)
   const cjkCount = cjkMatch ? cjkMatch.length : 0
-  const withoutCjk = clean.replace(/[一-鿿㐀-䶿豈-﫿]/g, ' ')
+  const withoutCjk = clean.replace(/[一-鿿㐀-䶿豈-﫿]/g, ' ')
   const enWords = withoutCjk.split(/\s+/).filter((w) => w.length > 0)
   const enCount = enWords.length
 
   return { chars, words: cjkCount + enCount }
 }
 
-export default function StatusBar({ content }: StatusBarProps) {
+export default function StatusBar({ content, fontSize }: StatusBarProps) {
   const stats = useMemo(() => countStats(content), [content])
   const startupMs = useMemo(() => {
     const start = (window as any).__appStart as number | undefined
@@ -39,6 +40,8 @@ export default function StatusBar({ content }: StatusBarProps) {
       <span className="status-item">词数: {stats.words}</span>
       <span className="status-divider">|</span>
       <span className="status-item">软件启动时间：{startupMs}ms</span>
+      <span className="status-divider">|</span>
+      <span className="status-item">字号: {fontSize}px (Ctrl+滚轮缩放)</span>
     </div>
   )
 }

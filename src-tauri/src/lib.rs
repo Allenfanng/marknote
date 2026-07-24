@@ -15,7 +15,7 @@ async fn write_file(path: String, content: String) -> Result<(), String> {
 #[tauri::command]
 async fn open_file_dialog() -> Result<Option<String>, String> {
     let file = AsyncFileDialog::new()
-        .add_filter("Markdown", &["md", "markdown", "txt"])
+        .add_filter("Markdown & Text", &["md", "markdown", "txt"])
         .set_title("Open Markdown File")
         .pick_file()
         .await;
@@ -50,7 +50,7 @@ async fn list_dir_files(dir_path: String) -> Result<Vec<String>, String> {
         if path.is_file() {
             if let Some(ext) = path.extension() {
                 let ext = ext.to_string_lossy().to_lowercase();
-                if ext == "md" || ext == "markdown" {
+                if ext == "md" || ext == "markdown" || ext == "txt" {
                     files.push(path.to_string_lossy().to_string());
                 }
             }
@@ -99,6 +99,41 @@ async fn add_recent_file(app: tauri::AppHandle, path: String) -> Result<(), Stri
     Ok(())
 }
 
+/// Open the folder containing `path` in the OS file manager, selecting the file.
+#[tauri::command]
+async fn open_in_folder(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("File does not exist: {}", path));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // explorer /select,"C:\path\to\file.ext"
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path))
+            .spawn()
+            .map_err(|e| format!("Failed to open explorer: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open Finder: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let parent = p.parent().unwrap_or(std::path::Path::new("."));
+        open::that(parent).map_err(|e| format!("Failed to open folder: {}", e))?;
+        Ok(())
+    }
+}
+
 #[tauri::command]
 async fn export_html(markdown: String, css: String) -> Result<(), String> {
     let file = AsyncFileDialog::new()
@@ -136,6 +171,8 @@ async fn export_html(markdown: String, css: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn export_pdf(markdown: String, css: String) -> Result<(), String> {
+    // Auto-trigger the browser print dialog (user can "Save as PDF" from there).
+    // A visible hint button is included as a fallback in case onload is blocked.
     let html = format!(r#"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -146,13 +183,26 @@ async fn export_pdf(markdown: String, css: String) -> Result<(), String> {
 {css}
 @media print {{
   body {{ margin: 0; }}
+  #print-hint {{ display: none; }}
+}}
+#print-hint {{
+  position: fixed; top: 12px; right: 12px; z-index: 9999;
+  padding: 10px 16px; background: #4a6fa5; color: #fff;
+  border-radius: 6px; font-family: sans-serif; font-size: 14px;
+  cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.2);
 }}
 </style>
 </head>
 <body>
+<div id="print-hint" onclick="window.print()">打印 / 另存为 PDF (点击此处)</div>
 <div class="markdown-body">
 {markdown}
 </div>
+<script>
+  window.onload = function() {{
+    setTimeout(function() {{ window.print(); }}, 300);
+  }};
+</script>
 </body>
 </html>"#);
     let tmp_dir = std::env::temp_dir().join("marknote-export");
@@ -161,6 +211,15 @@ async fn export_pdf(markdown: String, css: String) -> Result<(), String> {
     fs::write(&file_path, &html).map_err(|e| format!("Failed to write HTML: {}", e))?;
     open::that(&file_path).map_err(|e| format!("Failed to open browser: {}", e))?;
     Ok(())
+}
+
+/// Restore + focus the main window (used by single-instance & file-open paths).
+fn restore_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -174,18 +233,16 @@ pub fn run() {
             list_dir_files,
             get_recent_files,
             add_recent_file,
+            open_in_folder,
             export_html,
             export_pdf,
         ])
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             for arg in argv.iter() {
                 let lower = arg.to_lowercase();
-                if lower.ends_with(".md") || lower.ends_with(".markdown") {
+                if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".txt") {
                     if std::path::Path::new(arg).exists() {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
-                        }
+                        restore_main_window(app);
                         let _ = app.emit("file-opened", arg.clone());
                         break;
                     }
@@ -193,15 +250,18 @@ pub fn run() {
             }
         }))
         .setup(|app| {
-            // Check for file path in CLI args (file association on Windows)
+            // Ensure the main window is visible on startup (fixes first-launch
+            // after install where the window sometimes fails to appear).
+            restore_main_window(app.handle());
+
+            // Check for file path in CLI args (file association on Windows).
             let args: Vec<String> = std::env::args().collect();
             for arg in args.iter().skip(1) {
                 let path = arg.clone();
                 let lower = path.to_lowercase();
-                if lower.ends_with(".md") || lower.ends_with(".markdown") {
+                if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".txt") {
                     if std::path::Path::new(&path).exists() {
                         let app_handle = app.handle().clone();
-                        // Wait for frontend-ready event instead of fixed delay
                         app.once("frontend-ready", move |_| {
                             let _ = app_handle.emit("file-opened", path);
                         });

@@ -20,6 +20,8 @@
   --sidebar-item-hover: #e9ecef;
   --sidebar-item-active: #dbeafe;
   --status-bg: rgba(248, 249, 250, 0.9);
+  /* Editor font size — adjusted via Ctrl + 滚轮 */
+  --editor-font-size: 16px;
 }
 
 [data-theme='dark'] {
@@ -186,6 +188,51 @@ body {
 .tab-new:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* --- Tab right-click context menu --- */
+
+.tab-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  -webkit-app-region: no-drag;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.context-menu-item:disabled {
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.context-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-color);
 }
 
 .tab-bar-actions {
@@ -434,7 +481,7 @@ body {
   max-width: 800px;
   margin: 0 auto;
   padding: 0 48px;
-  font-size: 16px;
+  font-size: var(--editor-font-size);
   line-height: 1.7;
   color: var(--text-primary);
 }
@@ -474,7 +521,7 @@ body {
   outline: none;
   resize: none;
   font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-  font-size: 14px;
+  font-size: calc(var(--editor-font-size) - 2px);
   line-height: 1.7;
   tab-size: 2;
 }
@@ -617,6 +664,10 @@ body {
 }
 
 /* --- Milkdown heading size overrides (match Typora proportions) --- */
+
+.milkdown .ProseMirror {
+  font-size: var(--editor-font-size);
+}
 
 .milkdown .ProseMirror h1 {
   font-size: 2em;

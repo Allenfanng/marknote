@@ -41,12 +41,15 @@ function App() {
   const [activeTabId, setActiveTabId] = useState(tabs[0].id)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const editorRef = useRef<EditorHandle | null>(null)
+  const editorContainerRef = useRef<HTMLDivElement>(null)
   const [editorReady, setEditorReady] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [editorKey, setEditorKey] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; tabName: string } | null>(null)
+  const [fontSize, setFontSize] = useState(16)
   const justLoadedRef = useRef(true)
+  const editorReadyAtRef = useRef(0)
   const [EditorModule, setEditorModule] = useState<React.ComponentType<{
     defaultValue: string
     onChange: (markdown: string) => void
@@ -84,6 +87,7 @@ function App() {
   const resetEditor = useCallback(() => {
     setEditorReady(false)
     justLoadedRef.current = true
+    editorReadyAtRef.current = 0
     setEditorKey((k) => k + 1)
   }, [])
 
@@ -168,6 +172,7 @@ function App() {
       await invoke('export_html', { markdown: html, css })
     } catch (e) {
       console.error('Export HTML failed:', e)
+      alert('导出 HTML 失败：' + e)
     }
   }, [])
 
@@ -183,6 +188,7 @@ function App() {
       await invoke('export_pdf', { markdown: html, css })
     } catch (e) {
       console.error('Export PDF failed:', e)
+      alert('导出 PDF 失败：' + e + '\n\n将在浏览器中打开，请在打印对话框中选择"另存为 PDF"。')
     }
   }, [])
 
@@ -322,6 +328,9 @@ function App() {
 
   const handleEditorChange = useCallback((markdown: string) => {
     if (justLoadedRef.current) return
+    // Grace period: skip spurious markdownUpdated events fired right after the
+    // editor becomes ready (Milkdown emits them during initial normalization).
+    if (editorReadyAtRef.current && Date.now() - editorReadyAtRef.current < 500) return
     updateTab(activeTabIdRef.current, { content: markdown, isDirty: true })
   }, [updateTab])
 
@@ -362,12 +371,32 @@ function App() {
     const id = setInterval(() => {
       if (editorRef.current?.ready) {
         setEditorReady(true)
+        editorReadyAtRef.current = Date.now()
+        // Release justLoadedRef now; the 500ms timestamp guard in
+        // handleEditorChange absorbs Milkdown's spurious init-time
+        // markdownUpdated callbacks (fixes false "modified" state).
         justLoadedRef.current = false
         clearInterval(id)
       }
     }, 100)
     return () => clearInterval(id)
   }, [editorReady, activeTab.viewMode])
+
+  // Ctrl + wheel to zoom editor font size
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      setFontSize((prev) => {
+        const next = e.deltaY < 0 ? prev + 1 : prev - 1
+        return Math.max(10, Math.min(32, next))
+      })
+    }
+    const el = editorContainerRef.current
+    if (!el) return
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -468,7 +497,11 @@ function App() {
             onFileOpen={handleSidebarFileOpen}
           />
         )}
-        <div className="editor-wrapper">
+        <div
+          className="editor-wrapper"
+          ref={editorContainerRef}
+          style={{ ['--editor-font-size' as string]: `${fontSize}px` }}
+        >
           {activeTab.viewMode === 'wysiwyg' ? (
             <main className="editor-container">
               {!editorReady && (
@@ -491,7 +524,7 @@ function App() {
           ) : (
             <SourceView value={activeTab.sourceContent} onChange={handleSourceChange} />
           )}
-          <StatusBar content={currentContent} />
+          <StatusBar content={currentContent} fontSize={fontSize} />
         </div>
       </div>
       {isDragging && (
