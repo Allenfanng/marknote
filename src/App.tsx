@@ -12,6 +12,13 @@ import './App.css'
 
 const MD_EXTENSIONS = ['.md', '.markdown', '.txt']
 const AUTO_SAVE_INTERVAL = 3 * 60 * 1000
+const FONT_SIZE_STORAGE_KEY = 'marknote-font-size'
+const DEFAULT_FONT_SIZE = 16
+
+function getInitialFontSize(): number {
+  const saved = Number(localStorage.getItem(FONT_SIZE_STORAGE_KEY))
+  return Number.isInteger(saved) && saved >= 10 && saved <= 32 ? saved : DEFAULT_FONT_SIZE
+}
 
 let isFirstStartupFileOpen = true
 
@@ -47,7 +54,7 @@ function App() {
   const [editorKey, setEditorKey] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; tabName: string } | null>(null)
-  const [fontSize, setFontSize] = useState(16)
+  const [fontSize, setFontSize] = useState(getInitialFontSize)
   const justLoadedRef = useRef(true)
   const editorReadyAtRef = useRef(0)
   const [EditorModule, setEditorModule] = useState<React.ComponentType<{
@@ -382,7 +389,11 @@ function App() {
     return () => clearInterval(id)
   }, [editorReady, activeTab.viewMode])
 
-  // Ctrl + wheel to zoom editor font size
+  // Ctrl + wheel to zoom editor font size (persisted across sessions)
+  useEffect(() => {
+    localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(fontSize))
+  }, [fontSize])
+
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return
@@ -594,29 +605,47 @@ function markdownToHtml(md: string): string {
 }
 
 function getExportCss(): string {
+  // Mirrors the in-app document typography (App.css) so exported files
+  // look the same as the editor.
   return `
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-      max-width: 800px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+      max-width: 860px;
       margin: 0 auto;
-      padding: 40px 20px;
+      padding: 40px 48px;
       color: #1a1a2e;
-      line-height: 1.7;
+      font-size: 16px;
+      line-height: 1.75;
     }
-    h1 { font-size: 2em; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3em; }
-    h2 { font-size: 1.5em; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3em; }
-    h3 { font-size: 1.25em; }
-    code { background: #f1f3f5; padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; font-size: 0.9em; }
-    pre { background: #f8f9fa; padding: 16px; border-radius: 6px; overflow-x: auto; }
-    pre code { background: none; padding: 0; }
-    blockquote { border-left: 4px solid #d1d5db; padding-left: 16px; color: #6b7280; margin: 0; }
-    img { max-width: 100%; }
-    a { color: #4a6fa5; }
-    hr { border: none; border-top: 1px solid #e5e7eb; margin: 24px 0; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #d1d5db; padding: 8px 16px; }
-    th { background: #f1f3f5; }
-    ul, ol { padding-left: 2em; }
+    h1, h2, h3, h4, h5, h6 {
+      font-family: 'LXGW WenKai', '霞鹜文楷', 'Microsoft YaHei UI', '微软雅黑', 'PingFang SC', sans-serif;
+      font-weight: 600;
+      line-height: 1.4;
+      color: #1a1a2e;
+    }
+    h1 { font-size: 2em; margin: 1.1em 0 0.55em; padding-bottom: 0.25em; border-bottom: 1px solid #e5e7eb; }
+    h2 { font-size: 1.5em; margin: 1em 0 0.5em; padding-bottom: 0.2em; border-bottom: 1px solid #e5e7eb; }
+    h3 { font-size: 1.25em; margin: 0.9em 0 0.45em; }
+    h4 { font-size: 1.1em; margin: 0.8em 0 0.4em; }
+    h5 { font-size: 1em; margin: 0.7em 0 0.35em; }
+    h6 { font-size: 0.9em; margin: 0.7em 0 0.35em; color: #6b7280; }
+    h1:first-child, h2:first-child, h3:first-child { margin-top: 0; }
+    p { margin: 0.55em 0; }
+    ul, ol { margin: 0.55em 0; padding-left: 1.75em; }
+    li { margin: 0.2em 0; }
+    blockquote { margin: 0.9em 0; padding: 0.2em 0 0.2em 1em; border-left: 4px solid #d1d5db; color: #6b7280; }
+    code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace; font-size: 0.875em; background: #f1f3f5; padding: 0.1em 0.35em; border-radius: 4px; }
+    pre { background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.85em 1.1em; margin: 0.9em 0; overflow-x: auto; font-size: 0.875em; line-height: 1.6; }
+    pre code { background: none; padding: 0; font-size: inherit; }
+    a { color: #4a6fa5; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    hr { border: none; border-top: 1px solid #e5e7eb; margin: 1.4em 0; }
+    table { border-collapse: collapse; margin: 0.9em 0; font-size: 0.95em; }
+    th, td { border: 1px solid #dfe2e5; padding: 6px 14px; }
+    th { background: #f1f3f5; font-weight: 600; }
+    img { max-width: 100%; border-radius: 4px; }
+    strong { font-weight: 700; }
+    del { color: #6b7280; }
   `
 }
 
