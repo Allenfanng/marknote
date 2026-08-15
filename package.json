@@ -1,7 +1,7 @@
 {
   "name": "marknote",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,7 +18,8 @@
     "@tauri-apps/api": "^2.11.0",
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "remark-frontmatter": "^5.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

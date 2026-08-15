@@ -665,6 +665,36 @@ body {
   font-size: inherit;
 }
 
+/* YAML frontmatter panel */
+
+.content-preview pre.frontmatter,
+.editor-wrapper .milkdown .ProseMirror pre.frontmatter {
+  margin: 0 0 1.2em;
+  padding: 0.55em 1em 0.7em;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-family: var(--font-code);
+  font-size: 0.8em;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.content-preview pre.frontmatter::before,
+.editor-wrapper .milkdown .ProseMirror pre.frontmatter::before {
+  content: 'Front Matter';
+  display: block;
+  margin-bottom: 0.35em;
+  font-family: var(--font-body);
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
 /* Links */
 
 .content-preview a,

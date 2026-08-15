@@ -1,7 +1,8 @@
 import { useRef, useImperativeHandle, useState } from 'react'
 import { Crepe } from '@milkdown/crepe'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
-import { callCommand } from '@milkdown/utils'
+import { callCommand, $node, $remark } from '@milkdown/utils'
+import frontmatter from 'remark-frontmatter'
 import {
   toggleStrongCommand,
   toggleEmphasisCommand,
@@ -31,6 +32,43 @@ import '@milkdown/crepe/theme/common/reset.css'
 import '@milkdown/crepe/theme/common/prosemirror.css'
 import '@milkdown/crepe/theme/classic.css'
 import '@milkdown/crepe/theme/classic-dark.css'
+
+// --- YAML frontmatter support ---
+// Without this, a leading `--- ... ---` block is parsed by CommonMark as
+// "thematic break + paragraph + setext H2", rendering the metadata as a
+// giant bold heading. Instead we parse it into an atomic `frontmatter`
+// node rendered as a monospace panel (like Typora/MarkText). The node is
+// read-only in WYSIWYG — edit it in source mode.
+
+const remarkFrontmatterPlugin = $remark('remarkFrontmatter', () => frontmatter)
+
+const frontmatterNode = $node('frontmatter', () => ({
+  group: 'block',
+  atom: true,
+  isolating: true,
+  selectable: true,
+  marks: '',
+  attrs: { value: { default: '' } },
+  parseDOM: [
+    {
+      tag: 'pre.frontmatter',
+      getAttrs: (dom) => ({ value: (dom as HTMLElement).textContent ?? '' }),
+    },
+  ],
+  toDOM: (node) => ['pre', { class: 'frontmatter' }, node.attrs.value as string],
+  parseMarkdown: {
+    match: (node) => node.type === 'yaml',
+    runner: (state, node, type) => {
+      state.addNode(type, { value: (node.value as string | undefined) ?? '' })
+    },
+  },
+  toMarkdown: {
+    match: (node) => node.type.name === 'frontmatter',
+    runner: (state, node) => {
+      state.addNode('yaml', undefined, node.attrs.value as string)
+    },
+  },
+}))
 
 export interface ActiveState {
   bold: boolean
@@ -98,6 +136,8 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
         cursor: { virtual: false },
       },
     })
+
+    crepe.editor.use(remarkFrontmatterPlugin).use(frontmatterNode)
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {

@@ -565,7 +565,21 @@ function App() {
 
 function markdownToHtml(md: string): string {
   // Basic markdown to HTML conversion for export
-  let html = md
+  // Extract YAML frontmatter first — otherwise its closing `---` would turn
+  // the metadata lines into a setext-style heading / stray <hr>.
+  let frontmatterHtml = ''
+  const fmMatch = md.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/)
+  let body = md
+  if (fmMatch) {
+    const yaml = fmMatch[1]
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+    frontmatterHtml = `<pre class="frontmatter">${yaml}</pre>`
+    body = md.slice(fmMatch[0].length)
+  }
+
+  const html = body
     // Escape HTML entities first
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -601,7 +615,7 @@ function markdownToHtml(md: string): string {
     // Merge consecutive list items
     .replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
 
-  return html
+  return frontmatterHtml + html
 }
 
 function getExportCss(): string {
@@ -637,6 +651,7 @@ function getExportCss(): string {
     code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace; font-size: 0.875em; background: #f1f3f5; padding: 0.1em 0.35em; border-radius: 4px; }
     pre { background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.85em 1.1em; margin: 0.9em 0; overflow-x: auto; font-size: 0.875em; line-height: 1.6; }
     pre code { background: none; padding: 0; font-size: inherit; }
+    pre.frontmatter { margin: 0 0 1.2em; padding: 0.55em 1em 0.7em; font-size: 0.8em; line-height: 1.65; color: #6b7280; white-space: pre-wrap; word-break: break-word; }
     a { color: #4a6fa5; text-decoration: none; }
     a:hover { text-decoration: underline; }
     hr { border: none; border-top: 1px solid #e5e7eb; margin: 1.4em 0; }
