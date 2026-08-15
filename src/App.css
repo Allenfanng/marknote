@@ -650,11 +650,11 @@ body {
   margin: 0.9em 0;
   padding: 0.85em 1.1em;
   background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border: none;
   border-radius: 8px;
   overflow-x: auto;
   font-size: 0.875em;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 .content-preview pre code,
@@ -738,7 +738,7 @@ body {
 .editor-wrapper .milkdown .milkdown-table-block th,
 .editor-wrapper .milkdown .milkdown-table-block td {
   border: 1px solid var(--border-color);
-  padding: 6px 14px;
+  padding: 8px 16px;
 }
 
 .editor-wrapper .milkdown .milkdown-table-block td {

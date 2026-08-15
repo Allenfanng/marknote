@@ -40,7 +40,10 @@ import '@milkdown/crepe/theme/classic-dark.css'
 // node rendered as a monospace panel (like Typora/MarkText). The node is
 // read-only in WYSIWYG — edit it in source mode.
 
-const remarkFrontmatterPlugin = $remark('remarkFrontmatter', () => frontmatter)
+// NOTE: initialOptions is required — $remark defaults it to `{}`, and
+// remark-frontmatter({}) throws "Missing `type` in matter", killing the
+// whole editor init.
+const remarkFrontmatterPlugin = $remark('remarkFrontmatter', () => frontmatter, 'yaml')
 
 const frontmatterNode = $node('frontmatter', () => ({
   group: 'block',

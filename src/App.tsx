@@ -563,7 +563,21 @@ function App() {
   )
 }
 
-function markdownToHtml(md: string): string {
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// Inline formatting applied to table cell text (already HTML-escaped).
+function applyInline(s: string): string {
+  return s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+}
+
+export function markdownToHtml(md: string): string {
   // Basic markdown to HTML conversion for export
   // Extract YAML frontmatter first — otherwise its closing `---` would turn
   // the metadata lines into a setext-style heading / stray <hr>.
@@ -571,21 +585,36 @@ function markdownToHtml(md: string): string {
   const fmMatch = md.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/)
   let body = md
   if (fmMatch) {
-    const yaml = fmMatch[1]
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-    frontmatterHtml = `<pre class="frontmatter">${yaml}</pre>`
+    frontmatterHtml = `<pre class="frontmatter">${escapeHtml(fmMatch[1])}</pre>`
     body = md.slice(fmMatch[0].length)
   }
 
-  const html = body
-    // Escape HTML entities first
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    // Code blocks (fenced)
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+  // Extract fenced code blocks into placeholders BEFORE any other rule runs —
+  // otherwise line-based rules mangle their contents (a `# comment` would
+  // become a heading, each interior line would get wrapped in <p>, etc).
+  // `(?:```|$)` also handles a trailing unclosed fence (runs to EOF, like GFM).
+  const codeBlocks: string[] = []
+  body = body.replace(/```(\w*)[ \t]*\r?\n([\s\S]*?)(?:```|$)/g, (_m, lang: string, code: string) => {
+    codeBlocks.push(`<pre><code class="language-${lang}">${escapeHtml(code.replace(/\r?\n$/, ''))}</code></pre>`)
+    return `\x00CB${codeBlocks.length - 1}\x00`
+  })
+
+  // Extract GFM tables (header row + `---` delimiter row + body rows).
+  const tables: string[] = []
+  body = body.replace(/^\|[^\n]*\|[ \t]*\r?\n\|[ :|-]*\|[ \t]*(?:\r?\n\|[^\n]*\|[ \t]*)*/gm, (block) => {
+    const rows = block.replace(/\r/g, '').split('\n')
+    const splitRow = (line: string) =>
+      line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+    const head = splitRow(rows[0]).map((c) => `<th>${applyInline(escapeHtml(c))}</th>`).join('')
+    const bodyRows = rows
+      .slice(2)
+      .map((r) => `<tr>${splitRow(r).map((c) => `<td>${applyInline(escapeHtml(c))}</td>`).join('')}</tr>`)
+      .join('')
+    tables.push(`<table><thead><tr>${head}</tr></thead><tbody>${bodyRows}</tbody></table>`)
+    return `\x00TB${tables.length - 1}\x00`
+  })
+
+  const html = escapeHtml(body)
     // Inline code
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     // Images
@@ -610,10 +639,13 @@ function markdownToHtml(md: string): string {
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     // Ordered list
     .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-    // Paragraphs (lines not already in tags)
-    .replace(/^(?!<[hblpuoi]|<li|<hr|<pre|<code|<blockquote|<strong|<em|<del)(.+)$/gm, '<p>$1</p>')
+    // Paragraphs (lines not already in tags; \x00 placeholder lines skipped)
+    .replace(/^(?!\x00)(?!<[hblpuoi]|<li|<hr|<pre|<code|<blockquote|<strong|<em|<del)(.+)$/gm, '<p>$1</p>')
     // Merge consecutive list items
     .replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
+    // Restore code blocks and tables
+    .replace(/\x00CB(\d+)\x00/g, (_m, i: string) => codeBlocks[Number(i)])
+    .replace(/\x00TB(\d+)\x00/g, (_m, i: string) => tables[Number(i)])
 
   return frontmatterHtml + html
 }
@@ -649,14 +681,14 @@ function getExportCss(): string {
     li { margin: 0.2em 0; }
     blockquote { margin: 0.9em 0; padding: 0.2em 0 0.2em 1em; border-left: 4px solid #d1d5db; color: #6b7280; }
     code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace; font-size: 0.875em; background: #f1f3f5; padding: 0.1em 0.35em; border-radius: 4px; }
-    pre { background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.85em 1.1em; margin: 0.9em 0; overflow-x: auto; font-size: 0.875em; line-height: 1.6; }
+    pre { background: #f8f9fa; border: none; border-radius: 8px; padding: 0.85em 1.1em; margin: 0.9em 0; overflow-x: auto; font-size: 0.875em; line-height: 1.55; }
     pre code { background: none; padding: 0; font-size: inherit; }
     pre.frontmatter { margin: 0 0 1.2em; padding: 0.55em 1em 0.7em; font-size: 0.8em; line-height: 1.65; color: #6b7280; white-space: pre-wrap; word-break: break-word; }
     a { color: #4a6fa5; text-decoration: none; }
     a:hover { text-decoration: underline; }
     hr { border: none; border-top: 1px solid #e5e7eb; margin: 1.4em 0; }
     table { border-collapse: collapse; margin: 0.9em 0; font-size: 0.95em; }
-    th, td { border: 1px solid #dfe2e5; padding: 6px 14px; }
+    th, td { border: 1px solid #dfe2e5; padding: 8px 16px; }
     th { background: #f1f3f5; font-weight: 600; }
     img { max-width: 100%; border-radius: 4px; }
     strong { font-weight: 700; }
