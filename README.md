@@ -2,6 +2,8 @@
 
 类 Typora 的所见即所得 Markdown 桌面编辑器。
 
+![MarkNote](src-tauri/icons/128x128.png)
+
 ![MarkNote 界面截图](docs/screenshot.png)
 
 ## 特性
