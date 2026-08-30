@@ -24,6 +24,7 @@ import {
 } from '@milkdown/kit/preset/commonmark'
 import {
   toggleStrikethroughCommand,
+  insertTableCommand,
   strikethroughSchema,
 } from '@milkdown/kit/preset/gfm'
 import { commandsCtx, editorViewCtx } from '@milkdown/kit/core'
@@ -97,6 +98,7 @@ export interface EditorHandle {
   toggleBlockquote: () => void
   insertLink: (href: string) => void
   insertImage: (src: string, alt?: string) => void
+  insertTable: (rows: number, cols: number) => void
   getActiveState: () => ActiveState
 }
 
@@ -170,6 +172,7 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
     toggleBlockquote: () => { get()?.action(callCommand(wrapInBlockquoteCommand.key)) },
     insertLink: (href) => { get()?.action(callCommand(toggleLinkCommand.key, { href })) },
     insertImage: (src, alt) => { get()?.action(callCommand(insertImageCommand.key, { src, alt })) },
+    insertTable: (rows, cols) => { get()?.action(callCommand(insertTableCommand.key, { row: rows, col: cols })) },
     getActiveState: () => {
       const editor = get()
       if (!editor) return defaultActive

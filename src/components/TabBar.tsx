@@ -42,6 +42,8 @@ export default function TabBar({
 }: TabBarProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const lastWheelSwitchAt = useRef(0)
 
   useEffect(() => {
     if (!contextMenu) return
@@ -57,6 +59,28 @@ export default function TabBar({
       document.removeEventListener('keydown', handleKey)
     }
   }, [contextMenu])
+
+  // Keep the active tab visible when tabs overflow (the tab strip's
+  // scrollbars are hidden, so this is the only way it scrolls into view).
+  useEffect(() => {
+    tabsRef.current
+      ?.querySelector('.tab-item.active')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeTabId])
+
+  // Scroll wheel over the tab strip switches to the adjacent tab; throttled
+  // so one wheel notch moves one tab instead of skipping several.
+  const handleTabsWheel = (e: React.WheelEvent) => {
+    if (tabs.length < 2 || e.deltaY === 0) return
+    const now = Date.now()
+    if (now - lastWheelSwitchAt.current < 150) return
+    lastWheelSwitchAt.current = now
+    const idx = tabs.findIndex((t) => t.id === activeTabId)
+    if (idx < 0) return
+    const dir = e.deltaY > 0 ? 1 : -1
+    const nextIdx = Math.min(tabs.length - 1, Math.max(0, idx + dir))
+    if (nextIdx !== idx) onTabClick(tabs[nextIdx].id)
+  }
 
   const handleContextMenu = (e: React.MouseEvent, tab: Tab) => {
     e.preventDefault()
@@ -92,14 +116,13 @@ export default function TabBar({
     <div className="tab-bar">
       <div
         className="tab-bar-tabs"
-        onWheel={(e) => {
-          e.currentTarget.scrollLeft += e.deltaY
-        }}
+        ref={tabsRef}
+        onWheel={handleTabsWheel}
       >
         {tabs.map((tab) => {
           const fileName = tab.filePath
             ? tab.filePath.split(/[\\/]/).pop()
-            : 'Untitled'
+            : '未命名'
           const isActive = tab.id === activeTabId
           return (
             <div
@@ -107,7 +130,7 @@ export default function TabBar({
               className={`tab-item ${isActive ? 'active' : ''}`}
               onClick={() => onTabClick(tab.id)}
               onContextMenu={(e) => handleContextMenu(e, tab)}
-              title={tab.filePath ?? 'Untitled'}
+              title={tab.filePath ?? '未命名'}
             >
               <span className="tab-name">{fileName}</span>
               {tab.isDirty && <span className="tab-dirty-dot" />}
@@ -117,14 +140,14 @@ export default function TabBar({
                   e.stopPropagation()
                   onTabClose(tab.id)
                 }}
-                title="Close"
+                title="关闭标签页"
               >
                 <X size={12} />
               </button>
             </div>
           )
         })}
-        <button className="tab-new" onClick={onNewTab} title="New tab (Ctrl+N)">
+        <button className="tab-new" onClick={onNewTab} title="新建标签页 (Ctrl+N)">
           <Plus size={14} />
         </button>
       </div>
@@ -132,14 +155,14 @@ export default function TabBar({
         <button
           className={`titlebar-btn ${viewMode === 'source' ? 'active' : ''}`}
           onClick={onToggleViewMode}
-          title="Source code (Ctrl+/)"
+          title="源码模式 (Ctrl+/)"
         >
           <Code2 size={16} />
         </button>
         <button
           className="titlebar-btn"
           onClick={onToggleTheme}
-          title="Toggle theme"
+          title="切换主题"
         >
           {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
         </button>

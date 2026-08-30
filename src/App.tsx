@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { FileText } from 'lucide-react'
 import type { EditorHandle } from './components/Editor'
 import TabBar, { type Tab } from './components/TabBar'
 import Toolbar from './components/Toolbar'
@@ -45,7 +46,9 @@ function createTab(overrides?: Partial<Tab>): Tab {
 
 function App() {
   const [tabs, setTabs] = useState<Tab[]>([createTab()])
-  const [activeTabId, setActiveTabId] = useState(tabs[0].id)
+  // useState initializer args are evaluated on every render — guard for the
+  // empty-tabs state (all tabs closed).
+  const [activeTabId, setActiveTabId] = useState(tabs[0]?.id ?? '')
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const editorRef = useRef<EditorHandle | null>(null)
   const editorContainerRef = useRef<HTMLDivElement>(null)
@@ -104,6 +107,18 @@ function App() {
 
   const loadFile = useCallback(async (path: string) => {
     try {
+      // If this file is already open, switch to its tab instead of creating a
+      // duplicate — the file-opened event (double-clicking a file in Explorer)
+      // can fire repeatedly for the same path.
+      const existing = tabsRef.current.find((t) => t.filePath === path)
+      if (existing) {
+        if (existing.id !== activeTabIdRef.current) {
+          saveCurrentEditorContent()
+          setActiveTabId(existing.id)
+          resetEditor()
+        }
+        return
+      }
       const text = await invoke<string>('read_file', { path })
       let targetTabId: string
       setTabs((prev) => {
@@ -132,7 +147,7 @@ function App() {
     } catch (e) {
       console.error('Failed to load file:', e)
     }
-  }, [])
+  }, [saveCurrentEditorContent, resetEditor])
 
   // On startup, check if this window was opened with a file parameter
   useEffect(() => {
@@ -266,31 +281,26 @@ function App() {
       const idx = prev.findIndex((t) => t.id === tabId)
       const newTabs = prev.filter((t) => t.id !== tabId)
 
-      if (newTabs.length === 0) {
-        const newTab = createTab({
-          content: '# Untitled\n\n',
-          sourceContent: '# Untitled\n\n',
-        })
-        setActiveTabId(newTab.id)
-        resetEditor()
-        return [newTab]
-      }
-
       if (tabId === activeTabIdRef.current) {
-        const newActiveIdx = Math.min(idx, newTabs.length - 1)
-        setActiveTabId(newTabs[newActiveIdx].id)
+        if (newTabs.length === 0) {
+          // All tabs closed — show the empty state instead of auto-creating one.
+          setActiveTabId('')
+        } else {
+          const newActiveIdx = Math.min(idx, newTabs.length - 1)
+          setActiveTabId(newTabs[newActiveIdx].id)
+        }
         resetEditor()
       }
 
       return newTabs
     })
-  }, [])
+  }, [resetEditor])
 
   const handleTabClose = useCallback((tabId: string) => {
     const tab = tabsRef.current.find((t) => t.id === tabId)
     if (!tab) return
     if (tab.isDirty) {
-      const fileName = tab.filePath ? tab.filePath.split(/[\\/]/).pop()! : 'Untitled'
+      const fileName = tab.filePath ? tab.filePath.split(/[\\/]/).pop()! : '未命名'
       setCloseConfirm({ tabId, tabName: fileName })
       return
     }
@@ -374,7 +384,7 @@ function App() {
 
   // Poll for editor readiness
   useEffect(() => {
-    if (editorReady || activeTab.viewMode !== 'wysiwyg') return
+    if (editorReady || !activeTab || activeTab.viewMode !== 'wysiwyg') return
     const id = setInterval(() => {
       if (editorRef.current?.ready) {
         setEditorReady(true)
@@ -387,7 +397,7 @@ function App() {
       }
     }, 100)
     return () => clearInterval(id)
-  }, [editorReady, activeTab.viewMode])
+  }, [editorReady, activeTab?.viewMode])
 
   // Ctrl + wheel to zoom editor font size (persisted across sessions)
   useEffect(() => {
@@ -474,7 +484,9 @@ function App() {
     }
   }, [loadFile, saveCurrentEditorContent, resetEditor])
 
-  const currentContent = activeTab.viewMode === 'source' ? activeTab.sourceContent : activeTab.content
+  const currentContent = !activeTab
+    ? ''
+    : (activeTab.viewMode === 'source' ? activeTab.sourceContent : activeTab.content)
 
   return (
     <div className="app">
@@ -486,12 +498,12 @@ function App() {
         onNewTab={handleNewTab}
         theme={theme}
         onToggleTheme={toggleTheme}
-        viewMode={activeTab.viewMode}
+        viewMode={activeTab?.viewMode ?? 'wysiwyg'}
         onToggleViewMode={toggleViewMode}
       />
       <Toolbar
         editor={editorRef.current}
-        disabled={activeTab.viewMode === 'source' || !editorReady}
+        disabled={!activeTab || activeTab.viewMode === 'source' || !editorReady}
         onNew={handleNewTab}
         onOpen={handleOpen}
         onSave={handleSave}
@@ -503,7 +515,7 @@ function App() {
       <div className="main-area">
         {sidebarOpen && (
           <Sidebar
-            filePath={activeTab.filePath}
+            filePath={activeTab?.filePath ?? null}
             theme={theme}
             onFileOpen={handleSidebarFileOpen}
           />
@@ -513,34 +525,44 @@ function App() {
           ref={editorContainerRef}
           style={{ ['--editor-font-size' as string]: `${fontSize}px` }}
         >
-          {activeTab.viewMode === 'wysiwyg' ? (
-            <main className="editor-container">
-              {!editorReady && (
-                <div
-                  className="content-preview"
-                  dangerouslySetInnerHTML={{ __html: markdownToHtml(activeTab.content) }}
-                />
-              )}
-              <div style={editorReady ? undefined : { position: 'absolute', opacity: 0, pointerEvents: 'none' }}>
-                {EditorModule && (
-                  <EditorModule
-                    key={editorKey}
-                    defaultValue={activeTab.content}
-                    onChange={handleEditorChange}
-                    editorRef={editorRef}
-                  />
-                )}
-              </div>
-            </main>
+          {!activeTab ? (
+            <div className="empty-state">
+              <FileText size={40} className="empty-state-icon" />
+              <p className="empty-state-title">所有标签页已关闭</p>
+              <p className="empty-state-hint">Ctrl+N 新建文档 · Ctrl+O 打开文件 · 或点击上方 ＋ 新建标签页</p>
+            </div>
           ) : (
-            <SourceView value={activeTab.sourceContent} onChange={handleSourceChange} />
+            <>
+              {activeTab.viewMode === 'wysiwyg' ? (
+                <main className="editor-container">
+                  {!editorReady && (
+                    <div
+                      className="content-preview"
+                      dangerouslySetInnerHTML={{ __html: markdownToHtml(activeTab.content) }}
+                    />
+                  )}
+                  <div style={editorReady ? undefined : { position: 'absolute', opacity: 0, pointerEvents: 'none' }}>
+                    {EditorModule && (
+                      <EditorModule
+                        key={editorKey}
+                        defaultValue={activeTab.content}
+                        onChange={handleEditorChange}
+                        editorRef={editorRef}
+                      />
+                    )}
+                  </div>
+                </main>
+              ) : (
+                <SourceView value={activeTab.sourceContent} onChange={handleSourceChange} />
+              )}
+              <StatusBar content={currentContent} fontSize={fontSize} />
+            </>
           )}
-          <StatusBar content={currentContent} fontSize={fontSize} />
         </div>
       </div>
       {isDragging && (
         <div className="drop-overlay">
-          <div className="drop-overlay-text">Drop to open in new tab</div>
+          <div className="drop-overlay-text">松开以在新标签页中打开</div>
         </div>
       )}
       {closeConfirm && (
@@ -550,11 +572,11 @@ function App() {
           onClick={(e) => { if (e.target === e.currentTarget) handleCloseConfirmCancel() }}
         >
           <div className="close-confirm-content">
-            <p>Save changes to &quot;{closeConfirm.tabName}&quot;?</p>
+            <p>保存对&ldquo;{closeConfirm.tabName}&rdquo;的更改吗？</p>
             <div className="close-confirm-actions">
-              <button className="close-confirm-btn primary" onClick={handleCloseConfirmSave}>Save</button>
-              <button className="close-confirm-btn" onClick={handleCloseConfirmDiscard}>Don&apos;t Save</button>
-              <button className="close-confirm-btn" onClick={handleCloseConfirmCancel}>Cancel</button>
+              <button className="close-confirm-btn primary" onClick={handleCloseConfirmSave}>保存</button>
+              <button className="close-confirm-btn" onClick={handleCloseConfirmDiscard}>不保存</button>
+              <button className="close-confirm-btn" onClick={handleCloseConfirmCancel}>取消</button>
             </div>
           </div>
         </dialog>

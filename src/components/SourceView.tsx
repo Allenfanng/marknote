@@ -10,7 +10,7 @@ export default function SourceView({ value, onChange }: SourceViewProps) {
         className="source-textarea"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Start writing Markdown..."
+        placeholder="开始编写 Markdown…"
         spellCheck={false}
       />
     </div>
