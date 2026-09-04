@@ -541,6 +541,17 @@ body {
   caret-color: var(--accent-color);
 }
 
+/* --- 显示模式 ---
+   narrow（默认）：正文固定 860px 居中，窗口怎么变文字宽度都不变
+   fluid：正文铺满窗口，文字宽度跟着窗口走 */
+
+.app[data-width-mode='fluid'] .content-preview,
+.app[data-width-mode='fluid'] .editor-wrapper .milkdown .ProseMirror {
+  max-width: none;
+  padding-left: clamp(24px, 4vw, 72px);
+  padding-right: clamp(24px, 4vw, 72px);
+}
+
 .content-preview > :first-child,
 .editor-wrapper .milkdown .ProseMirror > :first-child {
   margin-top: 0;
@@ -787,6 +798,167 @@ body {
 .editor-wrapper .milkdown .milkdown-table-block th {
   background: var(--bg-secondary);
   font-weight: 600;
+}
+
+/* --- 表格边缘控件（加行 / 加列） ---
+   覆盖层本身是 0×0 的绝对定位盒子，子节点按「滚动内容坐标」摆放，
+   这样它会跟着正文一起滚动，又不会撑出额外的滚动高度。 */
+
+.table-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.table-grip,
+.table-edge-btn {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transition: background 0.12s, color 0.12s, transform 0.12s, border-color 0.12s;
+}
+
+.table-grip:hover,
+.table-edge-btn:hover {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
+  transform: scale(1.18);
+}
+
+.table-grip.active {
+  background: var(--active-bg);
+  border-color: var(--accent-color);
+  color: var(--active-text);
+}
+
+/* 鼠标贴到边缘时才强调一下，避免一直抢眼 */
+.table-edge-btn::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+.table-menu {
+  position: absolute;
+  z-index: 30;
+  min-width: 172px;
+  padding: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  pointer-events: auto;
+}
+
+.table-menu-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.table-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.table-menu-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.table-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.table-menu-item.danger {
+  color: #dc3545;
+}
+
+[data-theme='dark'] .table-menu-item.danger {
+  color: #ef9a9a;
+}
+
+.table-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-color);
+}
+
+/* --- 图表块（mermaid / svg） --- */
+
+.diagram-source-hidden {
+  display: none !important;
+}
+
+.diagram-preview {
+  margin: 0.9em 0;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.diagram-preview:hover {
+  border-color: var(--accent-color);
+}
+
+.diagram-preview-body {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+
+.diagram-preview-body svg {
+  max-width: 100%;
+  height: auto;
+  /* 没有自然尺寸的 svg（如仅 viewBox）不要无限拉伸 */
+  max-height: 420px;
+  /* mermaid 会把主题底色写进 inline style，这里统一交给容器背景 */
+  background: transparent !important;
+}
+
+.diagram-loading,
+.diagram-error {
+  padding: 6px 0;
+  font-size: 0.85em;
+  color: var(--text-secondary);
+}
+
+.diagram-error {
+  color: #dc3545;
 }
 
 /* Misc inline */

@@ -37,6 +37,10 @@ export default defineConfig({
           if (id.includes('node_modules/lucide-react')) {
             return 'vendor-lucide'
           }
+          // mermaid 只在文档里出现图表时才动态加载，单独成块
+          if (id.includes('node_modules/mermaid') || id.includes('node_modules/katex')) {
+            return 'vendor-mermaid'
+          }
         },
       },
     },

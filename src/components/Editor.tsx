@@ -27,7 +27,21 @@ import {
   insertTableCommand,
   strikethroughSchema,
 } from '@milkdown/kit/preset/gfm'
-import { commandsCtx, editorViewCtx } from '@milkdown/kit/core'
+import {
+  addRowAfter,
+  addRowBefore,
+  addColumnAfter,
+  addColumnBefore,
+  deleteRow,
+  deleteColumn,
+  deleteTable,
+  TableMap,
+} from '@milkdown/kit/prose/tables'
+import { TextSelection } from '@milkdown/kit/prose/state'
+import type { EditorView } from '@milkdown/kit/prose/view'
+import { commandsCtx, editorViewCtx, type Editor as MilkdownEditor } from '@milkdown/kit/core'
+import { diagramPlugin, diagramPluginKey } from '../lib/diagramPlugin'
+import { clearDiagramCache, setMermaidTheme } from '../lib/diagram'
 
 import '@milkdown/crepe/theme/common/reset.css'
 import '@milkdown/crepe/theme/common/prosemirror.css'
@@ -85,6 +99,15 @@ export interface ActiveState {
   blockquote: boolean
 }
 
+export type TableOp =
+  | 'addRowAfter'
+  | 'addRowBefore'
+  | 'addColAfter'
+  | 'addColBefore'
+  | 'deleteRow'
+  | 'deleteCol'
+  | 'deleteTable'
+
 export interface EditorHandle {
   ready: boolean
   getMarkdown: () => string
@@ -100,6 +123,12 @@ export interface EditorHandle {
   insertImage: (src: string, alt?: string) => void
   insertTable: (rows: number, cols: number) => void
   getActiveState: () => ActiveState
+  /** 暴露 ProseMirror view，供表格边缘控件做坐标 ↔ 文档位置的换算 */
+  getView: () => EditorView | null
+  /** 对指定表格执行行列增删；tablePos 是表格节点在文档中的起始位置 */
+  runTableOp: (op: TableOp, index: number, tablePos: number) => void
+  /** 主题切换后让图表按新配色重绘 */
+  setTheme: (theme: 'light' | 'dark') => void
 }
 
 const defaultActive: ActiveState = {
@@ -111,6 +140,52 @@ const defaultActive: ActiveState = {
   orderedList: false,
   codeBlock: false,
   blockquote: false,
+}
+
+/** 表格行列增删的公共实现（handle 与 dev 调试钩子共用） */
+function runTableOpImpl(
+  get: () => MilkdownEditor | undefined,
+  op: TableOp,
+  index: number,
+  tablePos: number,
+): void {
+  const editor = get()
+  if (!editor) return
+  editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx)
+    const table = view.state.doc.nodeAt(tablePos)
+    if (!table || table.type.name !== 'table') return
+
+    const map = TableMap.get(table)
+    const isRowOp = op === 'addRowAfter' || op === 'addRowBefore' || op === 'deleteRow'
+    const safeRow = Math.min(Math.max(index, 0), map.height - 1)
+    const safeCol = Math.min(Math.max(index, 0), map.width - 1)
+    // 表头行（第 0 行）不允许删除：删掉后表格不再是合法 GFM 结构，
+    // 会被自动修复机制搅乱；UI 侧同时禁用了该入口
+    if (op === 'deleteRow' && safeRow === 0) return
+    if (op === 'deleteCol' && map.width === 1) return
+    if (op === 'deleteRow' && map.height === 1) return
+    const cellIndex = isRowOp ? safeRow * map.width : safeCol
+    // map.map 是相对表格内容起点的偏移；tablePos 是表格节点前一个位置，
+    // 所以 +1 进入节点、再 +1 进入单元格
+    const cellPos = tablePos + 1 + map.map[cellIndex] + 1
+
+    const $cell = view.state.doc.resolve(Math.min(cellPos, view.state.doc.content.size))
+    view.dispatch(view.state.tr.setSelection(TextSelection.near($cell)))
+
+    switch (op) {
+      case 'addRowAfter': addRowAfter(view.state, view.dispatch); break
+      case 'addRowBefore': addRowBefore(view.state, view.dispatch); break
+      case 'addColAfter': addColumnAfter(view.state, view.dispatch); break
+      case 'addColBefore': addColumnBefore(view.state, view.dispatch); break
+      // deleteRow/deleteColumn 基于 selectedRect：光标落在哪个单元格，
+      // 删的就是那一行 / 那一列（整个表格只剩一行 / 一列时会拒绝删除）
+      case 'deleteRow': deleteRow(view.state, view.dispatch); break
+      case 'deleteCol': deleteColumn(view.state, view.dispatch); break
+      case 'deleteTable': deleteTable(view.state, view.dispatch); break
+    }
+    view.focus()
+  })
 }
 
 interface EditorInnerProps {
@@ -142,7 +217,10 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
       },
     })
 
-    crepe.editor.use(remarkFrontmatterPlugin).use(frontmatterNode)
+    crepe.editor
+      .use(remarkFrontmatterPlugin)
+      .use(frontmatterNode)
+      .use(diagramPlugin)
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {
@@ -159,6 +237,16 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
     setInitialized(true)
   }
 
+  // 开发模式调试钩子：自动化测试 / 控制台可直接读文档真相
+  if (import.meta.env.DEV) {
+    ;(window as unknown as Record<string, unknown>).__marknoteEditor = {
+      getMarkdown: () => crepeRef.current?.getMarkdown() ?? '',
+      getView: () => get()?.ctx.get(editorViewCtx) ?? null,
+      runTableOp: (op: TableOp, index: number, tablePos: number) =>
+        runTableOpImpl(get, op, index, tablePos),
+    }
+  }
+
   useImperativeHandle(editorRef, () => ({
     ready: initialized,
     getMarkdown: () => crepeRef.current?.getMarkdown() ?? '',
@@ -173,6 +261,20 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
     insertLink: (href) => { get()?.action(callCommand(toggleLinkCommand.key, { href })) },
     insertImage: (src, alt) => { get()?.action(callCommand(insertImageCommand.key, { src, alt })) },
     insertTable: (rows, cols) => { get()?.action(callCommand(insertTableCommand.key, { row: rows, col: cols })) },
+    getView: () => get()?.ctx.get(editorViewCtx) ?? null,
+
+    runTableOp: (op, index, tablePos) => runTableOpImpl(get, op, index, tablePos),
+
+    setTheme: (t) => {
+      setMermaidTheme(t)
+      clearDiagramCache()
+      // 用一个带 meta 的空事务触发图表装饰重算（选区/文档都没变，否则不会重算）
+      get()?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        view.dispatch(view.state.tr.setMeta(diagramPluginKey, t))
+      })
+    },
+
     getActiveState: () => {
       const editor = get()
       if (!editor) return defaultActive

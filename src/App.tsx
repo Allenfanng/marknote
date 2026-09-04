@@ -6,19 +6,28 @@ import { FileText } from 'lucide-react'
 import type { EditorHandle } from './components/Editor'
 import TabBar, { type Tab } from './components/TabBar'
 import Toolbar from './components/Toolbar'
+import TableControls from './components/TableControls'
 import SourceView from './components/SourceView'
 import Sidebar from './components/Sidebar'
 import StatusBar from './components/StatusBar'
+import { prepareDiagrams, sanitizeSvg } from './lib/diagram'
 import './App.css'
 
 const MD_EXTENSIONS = ['.md', '.markdown', '.txt']
 const AUTO_SAVE_INTERVAL = 3 * 60 * 1000
 const FONT_SIZE_STORAGE_KEY = 'marknote-font-size'
 const DEFAULT_FONT_SIZE = 16
+const WIDTH_MODE_STORAGE_KEY = 'marknote-width-mode'
+
+export type WidthMode = 'narrow' | 'fluid'
 
 function getInitialFontSize(): number {
   const saved = Number(localStorage.getItem(FONT_SIZE_STORAGE_KEY))
   return Number.isInteger(saved) && saved >= 10 && saved <= 32 ? saved : DEFAULT_FONT_SIZE
+}
+
+function getInitialWidthMode(): WidthMode {
+  return localStorage.getItem(WIDTH_MODE_STORAGE_KEY) === 'fluid' ? 'fluid' : 'narrow'
 }
 
 let isFirstStartupFileOpen = true
@@ -58,8 +67,10 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; tabName: string } | null>(null)
   const [fontSize, setFontSize] = useState(getInitialFontSize)
+  const [widthMode, setWidthMode] = useState<WidthMode>(getInitialWidthMode)
   const justLoadedRef = useRef(true)
   const editorReadyAtRef = useRef(0)
+  const editorScrollRef = useRef<HTMLElement>(null)
   const [EditorModule, setEditorModule] = useState<React.ComponentType<{
     defaultValue: string
     onChange: (markdown: string) => void
@@ -104,6 +115,21 @@ function App() {
   useEffect(() => {
     document.body.setAttribute('data-theme', theme)
   }, [theme])
+
+  // 显示模式（窄栏 / 跟随窗口）写入 localStorage，下次启动保持
+  useEffect(() => {
+    localStorage.setItem(WIDTH_MODE_STORAGE_KEY, widthMode)
+  }, [widthMode])
+
+  const toggleWidthMode = useCallback(() => {
+    setWidthMode((prev) => (prev === 'narrow' ? 'fluid' : 'narrow'))
+  }, [])
+
+  // 主题切换后让 mermaid 按新配色重绘
+  useEffect(() => {
+    if (!editorReady) return
+    editorRef.current?.setTheme(theme)
+  }, [theme, editorReady])
 
   const loadFile = useCallback(async (path: string) => {
     try {
@@ -189,7 +215,8 @@ function App() {
       const md = tab.viewMode === 'wysiwyg' && editorRef.current?.ready
         ? editorRef.current.getMarkdown()
         : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
-      const html = markdownToHtml(md)
+      const { text, blocks } = await prepareDiagrams(md)
+      const html = markdownToHtml(text, blocks)
       const css = getExportCss()
       await invoke('export_html', { markdown: html, css })
     } catch (e) {
@@ -205,7 +232,8 @@ function App() {
       const md = tab.viewMode === 'wysiwyg' && editorRef.current?.ready
         ? editorRef.current.getMarkdown()
         : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
-      const html = markdownToHtml(md)
+      const { text, blocks } = await prepareDiagrams(md)
+      const html = markdownToHtml(text, blocks)
       const css = getExportCss()
       await invoke('export_pdf', { markdown: html, css })
     } catch (e) {
@@ -489,7 +517,7 @@ function App() {
     : (activeTab.viewMode === 'source' ? activeTab.sourceContent : activeTab.content)
 
   return (
-    <div className="app">
+    <div className="app" data-width-mode={widthMode}>
       <TabBar
         tabs={tabs}
         activeTabId={activeTabId}
@@ -500,6 +528,8 @@ function App() {
         onToggleTheme={toggleTheme}
         viewMode={activeTab?.viewMode ?? 'wysiwyg'}
         onToggleViewMode={toggleViewMode}
+        widthMode={widthMode}
+        onToggleWidthMode={toggleWidthMode}
       />
       <Toolbar
         editor={editorRef.current}
@@ -534,7 +564,7 @@ function App() {
           ) : (
             <>
               {activeTab.viewMode === 'wysiwyg' ? (
-                <main className="editor-container">
+                <main className="editor-container" ref={editorScrollRef}>
                   {!editorReady && (
                     <div
                       className="content-preview"
@@ -551,6 +581,11 @@ function App() {
                       />
                     )}
                   </div>
+                  <TableControls
+                    containerRef={editorScrollRef}
+                    editor={editorRef.current}
+                    enabled={editorReady}
+                  />
                 </main>
               ) : (
                 <SourceView value={activeTab.sourceContent} onChange={handleSourceChange} />
@@ -599,7 +634,7 @@ function applyInline(s: string): string {
     .replace(/~~([^~]+)~~/g, '<del>$1</del>')
 }
 
-export function markdownToHtml(md: string): string {
+export function markdownToHtml(md: string, diagramBlocks: string[] = []): string {
   // Basic markdown to HTML conversion for export
   // Extract YAML frontmatter first — otherwise its closing `---` would turn
   // the metadata lines into a setext-style heading / stray <hr>.
@@ -617,6 +652,15 @@ export function markdownToHtml(md: string): string {
   // `(?:```|$)` also handles a trailing unclosed fence (runs to EOF, like GFM).
   const codeBlocks: string[] = []
   body = body.replace(/```(\w*)[ \t]*\r?\n([\s\S]*?)(?:```|$)/g, (_m, lang: string, code: string) => {
+    // ```svg 直接内联渲染（同步、无需额外依赖）；"```mermaid 走异步的
+    // prepareDiagrams，导出的 HTML/PDF 里会被替换成真正的图
+    if (lang.toLowerCase() === 'svg') {
+      const svg = sanitizeSvg(code.replace(/\r?\n$/, ''))
+      if (svg) {
+        codeBlocks.push(`<div class="diagram-svg">${svg}</div>`)
+        return `\x00CB${codeBlocks.length - 1}\x00`
+      }
+    }
     codeBlocks.push(`<pre><code class="language-${lang}">${escapeHtml(code.replace(/\r?\n$/, ''))}</code></pre>`)
     return `\x00CB${codeBlocks.length - 1}\x00`
   })
@@ -668,6 +712,8 @@ export function markdownToHtml(md: string): string {
     // Restore code blocks and tables
     .replace(/\x00CB(\d+)\x00/g, (_m, i: string) => codeBlocks[Number(i)])
     .replace(/\x00TB(\d+)\x00/g, (_m, i: string) => tables[Number(i)])
+    // Restore pre-rendered diagrams (mermaid / svg)
+    .replace(/\x00DG(\d+)\x00/g, (_m, i: string) => diagramBlocks[Number(i)] ?? '')
 
   return frontmatterHtml + html
 }
@@ -715,6 +761,9 @@ function getExportCss(): string {
     img { max-width: 100%; border-radius: 4px; }
     strong { font-weight: 700; }
     del { color: #6b7280; }
+    .diagram-svg, .diagram-mermaid { margin: 1.2em 0; text-align: center; }
+    .diagram-svg svg, .diagram-mermaid svg { max-width: 100%; height: auto; }
+    .diagram-error { color: #dc3545; font-size: 0.9em; }
   `
 }
 

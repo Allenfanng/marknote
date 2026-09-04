@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { Moon, Sun, Code2, Plus, X, FolderOpen, Copy, XCircle } from 'lucide-react'
+import { Moon, Sun, Code2, Plus, X, FolderOpen, Copy, XCircle, Minimize2, Maximize2 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
+import type { WidthMode } from '../App'
 
 export interface Tab {
   id: string
@@ -21,6 +22,8 @@ interface TabBarProps {
   onToggleTheme: () => void
   viewMode: 'wysiwyg' | 'source'
   onToggleViewMode: () => void
+  widthMode: WidthMode
+  onToggleWidthMode: () => void
 }
 
 interface ContextMenuState {
@@ -39,6 +42,8 @@ export default function TabBar({
   onToggleTheme,
   viewMode,
   onToggleViewMode,
+  widthMode,
+  onToggleWidthMode,
 }: TabBarProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -165,6 +170,13 @@ export default function TabBar({
           title="切换主题"
         >
           {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+        </button>
+        <button
+          className={`titlebar-btn ${widthMode === 'fluid' ? 'active' : ''}`}
+          onClick={onToggleWidthMode}
+          title={widthMode === 'narrow' ? '显示模式：窄栏（固定宽度）' : '显示模式：宽栏（跟随窗口）'}
+        >
+          {widthMode === 'narrow' ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
         </button>
       </div>
 
