@@ -16,6 +16,7 @@ import {
   Link,
   Image,
   Table,
+  BarChart3,
   Info,
   PanelLeftOpen,
   Download,
@@ -66,6 +67,8 @@ export default function Toolbar({
   const [active, setActive] = useState<ActiveState>(defaultActive)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const [diagramMenuOpen, setDiagramMenuOpen] = useState(false)
+  const diagramMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!editor || disabled) return
@@ -79,17 +82,19 @@ export default function Toolbar({
     return () => clearInterval(id)
   }, [editor, disabled])
 
-  // Close export menu on outside click
+  // Close export / diagram menus on outside click
   useEffect(() => {
-    if (!exportMenuOpen) return
+    if (!exportMenuOpen && !diagramMenuOpen) return
     const handleClick = (e: MouseEvent) => {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
-        setExportMenuOpen(false)
-      }
+      const target = e.target as Node
+      if (exportMenuRef.current?.contains(target)) return
+      if (diagramMenuRef.current?.contains(target)) return
+      setExportMenuOpen(false)
+      setDiagramMenuOpen(false)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [exportMenuOpen])
+  }, [exportMenuOpen, diagramMenuOpen])
 
   const fmtDisabled = disabled || !editor
 
@@ -271,6 +276,34 @@ export default function Toolbar({
         <Table size={16} />
       </button>
 
+      {/* Insert diagram dropdown */}
+      <div className="export-group" ref={diagramMenuRef}>
+        <button
+          className="toolbar-btn"
+          onClick={() => setDiagramMenuOpen((v) => !v)}
+          disabled={fmtDisabled}
+          data-tooltip="插入图表"
+        >
+          <BarChart3 size={16} />
+        </button>
+        {diagramMenuOpen && (
+          <div className="export-menu">
+            <button
+              className="export-menu-item"
+              onClick={() => { editor?.insertDiagram('mermaid'); setDiagramMenuOpen(false) }}
+            >
+              Mermaid 图
+            </button>
+            <button
+              className="export-menu-item"
+              onClick={() => { editor?.insertDiagram('svg'); setDiagramMenuOpen(false) }}
+            >
+              SVG 图
+            </button>
+          </div>
+        )}
+      </div>
+
       <div style={{ flex: 1 }} />
 
       {/* Export dropdown */}
@@ -306,7 +339,7 @@ export default function Toolbar({
     <dialog ref={dialogRef} className="about-dialog" onClick={(e) => { if (e.target === dialogRef.current) closeAbout() }}>
       <div className="about-content">
         <h2 className="about-title">MarkNote</h2>
-        <p className="about-version">v1.6.0</p>
+        <p className="about-version">v1.7.0</p>
         <p className="about-author">作者：FZ</p>
         <p className="about-contact">联系邮箱：fung9108@163.com</p>
         <button className="about-close" onClick={closeAbout}>关闭</button>

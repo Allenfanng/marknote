@@ -40,6 +40,35 @@ async fn save_file_dialog() -> Result<Option<String>, String> {
     }
 }
 
+/// 通用"另存为"对话框：导出 SVG / HTML 等非 Markdown 内容时用，
+/// 调用方可以自己给默认文件名、标题和扩展名过滤。
+#[derive(serde::Deserialize)]
+struct SaveFilter {
+    name: String,
+    extensions: Vec<String>,
+}
+
+#[tauri::command]
+async fn save_file_as(
+    default_name: String,
+    title: String,
+    filters: Vec<SaveFilter>,
+) -> Result<Option<String>, String> {
+    let mut dialog = AsyncFileDialog::new()
+        .set_file_name(&default_name)
+        .set_title(&title);
+
+    for f in &filters {
+        let exts: Vec<&str> = f.extensions.iter().map(|s| s.as_str()).collect();
+        dialog = dialog.add_filter(&f.name, &exts);
+    }
+
+    match dialog.save_file().await {
+        Some(handle) => Ok(Some(handle.path().to_string_lossy().to_string())),
+        None => Ok(None),
+    }
+}
+
 #[tauri::command]
 async fn list_dir_files(dir_path: String) -> Result<Vec<String>, String> {
     let entries = fs::read_dir(&dir_path).map_err(|e| format!("Failed to read directory: {}", e))?;
@@ -230,6 +259,7 @@ pub fn run() {
             write_file,
             open_file_dialog,
             save_file_dialog,
+            save_file_as,
             list_dir_files,
             get_recent_files,
             add_recent_file,

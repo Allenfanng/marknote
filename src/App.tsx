@@ -7,10 +7,12 @@ import type { EditorHandle } from './components/Editor'
 import TabBar, { type Tab } from './components/TabBar'
 import Toolbar from './components/Toolbar'
 import TableControls from './components/TableControls'
+import DiagramViewer from './components/DiagramViewer'
 import SourceView from './components/SourceView'
 import Sidebar from './components/Sidebar'
 import StatusBar from './components/StatusBar'
 import { prepareDiagrams, sanitizeSvg } from './lib/diagram'
+import { DIAGRAM_ZOOM_EVENT, type DiagramZoomDetail } from './lib/diagramActions'
 import './App.css'
 
 const MD_EXTENSIONS = ['.md', '.markdown', '.txt']
@@ -68,6 +70,8 @@ function App() {
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; tabName: string } | null>(null)
   const [fontSize, setFontSize] = useState(getInitialFontSize)
   const [widthMode, setWidthMode] = useState<WidthMode>(getInitialWidthMode)
+  // 图表全屏查看：由 diagramPlugin 里的悬浮按钮通过自定义事件唤起
+  const [zoomDiagram, setZoomDiagram] = useState<DiagramZoomDetail | null>(null)
   const justLoadedRef = useRef(true)
   const editorReadyAtRef = useRef(0)
   const editorScrollRef = useRef<HTMLElement>(null)
@@ -89,6 +93,17 @@ function App() {
 
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { activeTabIdRef.current = activeTabId }, [activeTabId])
+
+  // 图表预览的「放大」按钮 → 打开全屏查看器
+  useEffect(() => {
+    const onZoom = (e: Event) => {
+      const detail = (e as CustomEvent<DiagramZoomDetail>).detail
+      if (!detail?.svg) return
+      setZoomDiagram(detail)
+    }
+    document.addEventListener(DIAGRAM_ZOOM_EVENT, onZoom)
+    return () => document.removeEventListener(DIAGRAM_ZOOM_EVENT, onZoom)
+  }, [])
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0]
 
@@ -595,6 +610,13 @@ function App() {
           )}
         </div>
       </div>
+      {zoomDiagram && (
+        <DiagramViewer
+          svg={zoomDiagram.svg}
+          title={zoomDiagram.title}
+          onClose={() => setZoomDiagram(null)}
+        />
+      )}
       {isDragging && (
         <div className="drop-overlay">
           <div className="drop-overlay-text">松开以在新标签页中打开</div>

@@ -922,6 +922,7 @@ body {
 }
 
 .diagram-preview {
+  position: relative;
   margin: 0.9em 0;
   padding: 14px;
   border: 1px solid var(--border-color);
@@ -944,10 +945,221 @@ body {
 .diagram-preview-body svg {
   max-width: 100%;
   height: auto;
-  /* 没有自然尺寸的 svg（如仅 viewBox）不要无限拉伸 */
-  max-height: 420px;
+  /* 没有自然尺寸的 svg（如仅 viewBox）不要无限拉伸；
+     宽图会被正文栏压小，看不清时点"放大"进全屏看 */
+  max-height: 560px;
   /* mermaid 会把主题底色写进 inline style，这里统一交给容器背景 */
   background: transparent !important;
+}
+
+/* 悬浮操作条：全屏放大 / 导出 SVG / 编辑源码 */
+.diagram-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+
+.diagram-preview:hover .diagram-actions,
+.diagram-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.diagram-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.diagram-action-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.diagram-action-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 导出结果提示 */
+.diagram-toast {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s, transform 0.15s;
+  pointer-events: none;
+}
+
+.diagram-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.diagram-toast.error {
+  background: #dc3545;
+  color: #fff;
+}
+
+/* 图表全屏查看器 */
+.diagram-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  animation: dv-fade-in 0.12s ease-out;
+}
+
+@keyframes dv-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.diagram-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 0 0 auto;
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--toolbar-bg);
+}
+
+.diagram-viewer-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.diagram-viewer-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.dv-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dv-btn.dv-close:hover {
+  background: #dc3545;
+  color: #fff;
+}
+
+.dv-btn-text {
+  white-space: nowrap;
+}
+
+.dv-scale {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dv-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--divider-color);
+}
+
+.diagram-viewer-stage {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden;
+  cursor: grab;
+  /* 棋盘底：透明 SVG 也能看清边界 */
+  background-color: var(--bg-secondary);
+  background-image:
+    linear-gradient(45deg, var(--bg-hover) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-hover) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-hover) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-hover) 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}
+
+.diagram-viewer-stage.dragging {
+  cursor: grabbing;
+}
+
+.diagram-viewer-canvas {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.diagram-viewer-canvas svg {
+  display: block;
+  max-width: none;
+  max-height: none;
+}
+
+.diagram-viewer-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12px;
+  opacity: 0.85;
+  pointer-events: none;
 }
 
 .diagram-loading,

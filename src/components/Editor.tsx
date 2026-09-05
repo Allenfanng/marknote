@@ -88,6 +88,19 @@ const frontmatterNode = $node('frontmatter', () => ({
   },
 }))
 
+/** 插入图表时的起始模板：直接给一份能跑通的样例，用户改起来有参照 */
+const MERMAID_TEMPLATE = `flowchart TD
+  A[开始] --> B{条件判断}
+  B -->|是| C[处理一]
+  B -->|否| D[处理二]
+  C --> E[结束]
+  D --> E`
+
+const SVG_TEMPLATE = `<svg viewBox="0 0 240 90" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="220" height="70" rx="10" fill="#4a6fa5"/>
+  <text x="120" y="52" fill="#ffffff" font-size="18" text-anchor="middle">Hello MarkNote</text>
+</svg>`
+
 export interface ActiveState {
   bold: boolean
   italic: boolean
@@ -122,6 +135,8 @@ export interface EditorHandle {
   insertLink: (href: string) => void
   insertImage: (src: string, alt?: string) => void
   insertTable: (rows: number, cols: number) => void
+  /** 插入带语言标注的图表代码块（mermaid / svg），模板内容会处于选中态 */
+  insertDiagram: (lang: 'mermaid' | 'svg') => void
   getActiveState: () => ActiveState
   /** 暴露 ProseMirror view，供表格边缘控件做坐标 ↔ 文档位置的换算 */
   getView: () => EditorView | null
@@ -261,6 +276,41 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
     insertLink: (href) => { get()?.action(callCommand(toggleLinkCommand.key, { href })) },
     insertImage: (src, alt) => { get()?.action(callCommand(insertImageCommand.key, { src, alt })) },
     insertTable: (rows, cols) => { get()?.action(callCommand(insertTableCommand.key, { row: rows, col: cols })) },
+
+    insertDiagram: (lang) => {
+      get()?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        const type = view.state.schema.nodes.code_block
+        if (!type) return
+        const template = lang === 'svg' ? SVG_TEMPLATE : MERMAID_TEMPLATE
+        const { state } = view
+        const node = type.create({ language: lang }, state.schema.text(template))
+        const $from = state.selection.$from
+        let tr = state.tr
+
+        // 光标停在空段落里时直接替换掉这个段落，避免留下一个空行
+        const inEmptyBlock = $from.depth > 0 && $from.parent.isTextblock && $from.parent.content.size === 0
+        if (inEmptyBlock) {
+          tr = tr.replaceWith($from.before($from.depth), $from.after($from.depth), node)
+        } else {
+          tr = tr.replaceSelectionWith(node)
+        }
+
+        // 选中刚插入的模板内容，用户直接敲字就能整体替换掉
+        let found = -1
+        tr.doc.descendants((n, pos) => {
+          if (n.type.name === 'code_block' && n.textContent === template) found = pos
+        })
+        if (found >= 0) {
+          const start = found + 1
+          tr = tr.setSelection(TextSelection.create(tr.doc, start, start + template.length))
+        }
+
+        view.dispatch(tr.scrollIntoView())
+        view.focus()
+      })
+    },
+
     getView: () => get()?.ctx.get(editorViewCtx) ?? null,
 
     runTableOp: (op, index, tablePos) => runTableOpImpl(get, op, index, tablePos),
