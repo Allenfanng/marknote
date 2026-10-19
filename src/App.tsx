@@ -4,7 +4,7 @@ import { listen, emit } from '@tauri-apps/api/event'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { FileText } from 'lucide-react'
 import type { EditorHandle } from './components/Editor'
-import TabBar, { type Tab } from './components/TabBar'
+import TabBar, { type Tab, type TabViewState } from './components/TabBar'
 import Toolbar from './components/Toolbar'
 import TableControls from './components/TableControls'
 import DiagramViewer from './components/DiagramViewer'
@@ -75,6 +75,7 @@ function App() {
   const justLoadedRef = useRef(true)
   const editorReadyAtRef = useRef(0)
   const editorScrollRef = useRef<HTMLElement>(null)
+  const sourceTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [EditorModule, setEditorModule] = useState<React.ComponentType<{
     defaultValue: string
     onChange: (markdown: string) => void
@@ -127,6 +128,44 @@ function App() {
     setEditorKey((k) => k + 1)
   }, [])
 
+  // 记住当前标签页离开时的视图状态（滚动位置 + 光标/选区），
+  // 切回时由下方两个恢复 effect 还原
+  const captureViewState = useCallback(() => {
+    const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
+    if (!tab) return
+    const viewState: TabViewState = { ...tab.viewState }
+    if (tab.viewMode === 'wysiwyg') {
+      const el = editorScrollRef.current
+      if (el) {
+        viewState.wysiwyg = { ...viewState.wysiwyg, scrollTop: el.scrollTop }
+      }
+      const handle = editorRef.current
+      const selection = handle?.ready ? handle.getSelectionSnapshot() : null
+      if (selection) {
+        viewState.wysiwyg = { ...viewState.wysiwyg, selection }
+      }
+    } else {
+      const ta = sourceTextareaRef.current
+      if (ta) {
+        viewState.source = {
+          scrollTop: ta.scrollTop,
+          cursor: { start: ta.selectionStart, end: ta.selectionEnd },
+        }
+      }
+    }
+    updateTab(tab.id, { viewState })
+  }, [updateTab])
+
+  // 统一的切换标签路径：捕获离开状态 → 保存内容 → 激活目标标签 → 重建编辑器。
+  // 点击标签 / 打开已打开文件 / 侧边栏 / 拖放 / 滚轮切换都走这里
+  const switchToTab = useCallback((tabId: string) => {
+    if (tabId === activeTabIdRef.current) return
+    captureViewState()
+    saveCurrentEditorContent()
+    setActiveTabId(tabId)
+    resetEditor()
+  }, [captureViewState, saveCurrentEditorContent, resetEditor])
+
   useEffect(() => {
     document.body.setAttribute('data-theme', theme)
   }, [theme])
@@ -153,15 +192,11 @@ function App() {
       // can fire repeatedly for the same path.
       const existing = tabsRef.current.find((t) => t.filePath === path)
       if (existing) {
-        if (existing.id !== activeTabIdRef.current) {
-          saveCurrentEditorContent()
-          setActiveTabId(existing.id)
-          resetEditor()
-        }
+        switchToTab(existing.id)
         return
       }
       const text = await invoke<string>('read_file', { path })
-      let targetTabId: string
+      let targetTabId: string | undefined
       setTabs((prev) => {
         const soleTab = prev.length === 1 ? prev[0] : null
         if (
@@ -182,13 +217,17 @@ function App() {
         targetTabId = newTab.id
         return [...prev, newTab]
       })
+      // 目标是另一个标签页（而非启动时替换唯一空白标签）才需要记住离开位置
+      if (targetTabId !== undefined && targetTabId !== activeTabIdRef.current) {
+        captureViewState()
+      }
       setActiveTabId(targetTabId!)
       resetEditor()
       invoke('add_recent_file', { path }).catch(console.error)
     } catch (e) {
       console.error('Failed to load file:', e)
     }
-  }, [saveCurrentEditorContent, resetEditor])
+  }, [switchToTab, captureViewState, resetEditor])
 
   // On startup, check if this window was opened with a file parameter
   useEffect(() => {
@@ -263,18 +302,14 @@ function App() {
       if (!path) return
       const existingTab = tabsRef.current.find((t) => t.filePath === path)
       if (existingTab) {
-        if (existingTab.id !== activeTabIdRef.current) {
-          saveCurrentEditorContent()
-          setActiveTabId(existingTab.id)
-          resetEditor()
-        }
+        switchToTab(existingTab.id)
       } else {
         await loadFile(path)
       }
     } catch (e) {
       console.error('Open failed:', e)
     }
-  }, [loadFile, saveCurrentEditorContent])
+  }, [loadFile, switchToTab])
 
   const handleSave = useCallback(async () => {
     try {
@@ -302,6 +337,7 @@ function App() {
   }, [updateTab])
 
   const handleNewTab = useCallback(() => {
+    captureViewState()
     saveCurrentEditorContent()
     const newTab = createTab({
       content: '# Untitled\n\n',
@@ -310,14 +346,7 @@ function App() {
     setTabs((prev) => [...prev, newTab])
     setActiveTabId(newTab.id)
     resetEditor()
-  }, [saveCurrentEditorContent, resetEditor])
-
-  const handleTabClick = useCallback((tabId: string) => {
-    if (tabId === activeTabIdRef.current) return
-    saveCurrentEditorContent()
-    setActiveTabId(tabId)
-    resetEditor()
-  }, [saveCurrentEditorContent, resetEditor])
+  }, [captureViewState, saveCurrentEditorContent, resetEditor])
 
   const closeTab = useCallback((tabId: string) => {
     setTabs((prev) => {
@@ -405,6 +434,8 @@ function App() {
   const toggleViewMode = useCallback(() => {
     const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
     if (!tab) return
+    // 两种方向都先记住当前模式的位置（WYSIWYG ↔ 源码各自独立记忆）
+    captureViewState()
     if (tab.viewMode === 'wysiwyg') {
       const md = editorRef.current?.getMarkdown() ?? tab.content
       updateTab(tab.id, { viewMode: 'source', sourceContent: md })
@@ -412,7 +443,7 @@ function App() {
       updateTab(tab.id, { viewMode: 'wysiwyg', content: tab.sourceContent })
       resetEditor()
     }
-  }, [updateTab, resetEditor])
+  }, [captureViewState, updateTab, resetEditor])
 
   // Auto-save every 3 minutes
   useEffect(() => {
@@ -441,6 +472,64 @@ function App() {
     }, 100)
     return () => clearInterval(id)
   }, [editorReady, activeTab?.viewMode])
+
+  // 切换标签页 / 视图模式后立即按记忆值定位：源码模式直接恢复 textarea 的
+  // 光标与滚动；WYSIWYG 此时容器里还是即时预览，先大致定位，编辑器就绪后
+  // 由下一个 effect 精确恢复。无记忆（首次打开）则确定性回到顶部——
+  // 源码 textarea 在两个源码标签间是复用的，不覆写会残留上个标签的位置
+  useEffect(() => {
+    if (!activeTab) return
+    const vs = activeTab.viewState
+    if (activeTab.viewMode === 'source') {
+      const ta = sourceTextareaRef.current
+      if (!ta) return
+      const s = vs?.source
+      if (typeof s?.scrollTop === 'number') {
+        // 先恢复光标再恢复滚动：setSelectionRange 可能把 textarea 滚向光标处
+        if (s.cursor) ta.setSelectionRange(s.cursor.start, s.cursor.end)
+        ta.scrollTop = s.scrollTop
+      } else {
+        ta.scrollTop = 0
+      }
+    } else if (editorScrollRef.current) {
+      const st = vs?.wysiwyg?.scrollTop
+      editorScrollRef.current.scrollTop = typeof st === 'number' ? st : 0
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabId, activeTab?.viewMode])
+
+  // 编辑器重建就绪后精确恢复 WYSIWYG 的选区与滚动位置。选区恢复不触发
+  // markdownUpdated（无文档变更），不会误标 isDirty
+  useEffect(() => {
+    if (!editorReady || !activeTab || activeTab.viewMode !== 'wysiwyg') return
+    const s = activeTab.viewState?.wysiwyg
+    if (!s) return
+    if (s.selection) {
+      editorRef.current?.restoreSelectionSnapshot(s.selection)
+    }
+    const target = s.scrollTop
+    if (typeof target !== 'number' || target === 0) return
+    // Milkdown 初始渲染与图片/图表异步加载期间文档高度仍在增长，scrollTop
+    // 会被夹紧——用 rAF 重写直到定位准确且高度稳定（上限约 1s 防空转）
+    const tabId = activeTabIdRef.current
+    const el = editorScrollRef.current
+    let tries = 0
+    let lastHeight = 0
+    let stableFrames = 0
+    const apply = () => {
+      const container = editorScrollRef.current
+      if (!container || activeTabIdRef.current !== tabId) return
+      container.scrollTop = target
+      const height = container.scrollHeight
+      stableFrames = height === lastHeight ? stableFrames + 1 : 0
+      lastHeight = height
+      const stuck = Math.abs(container.scrollTop - target) < 1
+      if ((stuck && stableFrames >= 5) || ++tries >= 60) return
+      requestAnimationFrame(apply)
+    }
+    if (el) requestAnimationFrame(apply)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorReady, editorKey])
 
   // Ctrl + wheel to zoom editor font size (persisted across sessions)
   useEffect(() => {
@@ -496,11 +585,7 @@ function App() {
         if (mdFile) {
           const existingTab = tabsRef.current.find((t) => t.filePath === mdFile)
           if (existingTab) {
-            if (existingTab.id !== activeTabIdRef.current) {
-              saveCurrentEditorContent()
-              setActiveTabId(existingTab.id)
-              resetEditor()
-            }
+            switchToTab(existingTab.id)
           } else {
             loadFile(mdFile)
           }
@@ -512,20 +597,16 @@ function App() {
     return () => {
       unlistenPromise.then((fn) => fn())
     }
-  }, [loadFile, saveCurrentEditorContent, resetEditor])
+  }, [loadFile, switchToTab])
 
   const handleSidebarFileOpen = useCallback((path: string) => {
     const existingTab = tabsRef.current.find((t) => t.filePath === path)
     if (existingTab) {
-      if (existingTab.id !== activeTabIdRef.current) {
-        saveCurrentEditorContent()
-        setActiveTabId(existingTab.id)
-        resetEditor()
-      }
+      switchToTab(existingTab.id)
     } else {
       loadFile(path)
     }
-  }, [loadFile, saveCurrentEditorContent, resetEditor])
+  }, [loadFile, switchToTab])
 
   const currentContent = !activeTab
     ? ''
@@ -536,7 +617,7 @@ function App() {
       <TabBar
         tabs={tabs}
         activeTabId={activeTabId}
-        onTabClick={handleTabClick}
+        onTabClick={switchToTab}
         onTabClose={handleTabClose}
         onNewTab={handleNewTab}
         theme={theme}
@@ -603,7 +684,11 @@ function App() {
                   />
                 </main>
               ) : (
-                <SourceView value={activeTab.sourceContent} onChange={handleSourceChange} />
+                <SourceView
+                  value={activeTab.sourceContent}
+                  onChange={handleSourceChange}
+                  textareaRef={sourceTextareaRef}
+                />
               )}
               <StatusBar content={currentContent} fontSize={fontSize} />
             </>

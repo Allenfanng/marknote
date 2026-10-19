@@ -3,6 +3,14 @@ import { Moon, Sun, Code2, Plus, X, FolderOpen, Copy, XCircle, Minimize2, Maximi
 import { invoke } from '@tauri-apps/api/core'
 import type { WidthMode } from '../App'
 
+/** 标签页离开时的视图状态快照，切回时恢复（纯内存，随标签页存亡） */
+export interface TabViewState {
+  /** WYSIWYG：滚动容器 scrollTop + ProseMirror Selection.toJSON() */
+  wysiwyg?: { scrollTop?: number; selection?: Record<string, unknown> }
+  /** 源码模式：textarea scrollTop + 光标区间（字符偏移） */
+  source?: { scrollTop?: number; cursor?: { start: number; end: number } }
+}
+
 export interface Tab {
   id: string
   filePath: string | null
@@ -10,6 +18,7 @@ export interface Tab {
   sourceContent: string
   isDirty: boolean
   viewMode: 'wysiwyg' | 'source'
+  viewState?: TabViewState
 }
 
 interface TabBarProps {

@@ -37,7 +37,7 @@ import {
   deleteTable,
   TableMap,
 } from '@milkdown/kit/prose/tables'
-import { TextSelection } from '@milkdown/kit/prose/state'
+import { Selection, TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { commandsCtx, editorViewCtx, type Editor as MilkdownEditor } from '@milkdown/kit/core'
 import { diagramPlugin, diagramPluginKey } from '../lib/diagramPlugin'
@@ -140,6 +140,10 @@ export interface EditorHandle {
   getActiveState: () => ActiveState
   /** 暴露 ProseMirror view，供表格边缘控件做坐标 ↔ 文档位置的换算 */
   getView: () => EditorView | null
+  /** 当前选区快照（Selection.toJSON()），用于标签页切换时记忆位置 */
+  getSelectionSnapshot: () => Record<string, unknown> | null
+  /** 恢复选区快照（不触发滚动）；偏移非法或文档结构不匹配时返回 false */
+  restoreSelectionSnapshot: (json: Record<string, unknown>) => boolean
   /** 对指定表格执行行列增删；tablePos 是表格节点在文档中的起始位置 */
   runTableOp: (op: TableOp, index: number, tablePos: number) => void
   /** 主题切换后让图表按新配色重绘 */
@@ -312,6 +316,24 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
     },
 
     getView: () => get()?.ctx.get(editorViewCtx) ?? null,
+
+    getSelectionSnapshot: () => {
+      const view = get()?.ctx.get(editorViewCtx)
+      return view ? (view.state.selection.toJSON() as Record<string, unknown>) : null
+    },
+
+    restoreSelectionSnapshot: (json) => {
+      const view = get()?.ctx.get(editorViewCtx)
+      if (!view) return false
+      try {
+        // 不带 scrollIntoView：滚动位置由 App 层按记忆值单独恢复
+        view.dispatch(view.state.tr.setSelection(Selection.fromJSON(view.state.doc, json)))
+        return true
+      } catch {
+        // 选区偏移失效（如源码模式改过内容后偏移越界/结构不匹配），放弃恢复
+        return false
+      }
+    },
 
     runTableOp: (op, index, tablePos) => runTableOpImpl(get, op, index, tablePos),
 
