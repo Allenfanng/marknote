@@ -2,14 +2,66 @@ use std::fs;
 use rfd::AsyncFileDialog;
 use tauri::{Emitter, Listener, Manager};
 
-#[tauri::command]
-async fn read_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+#[derive(serde::Serialize)]
+pub struct ReadFileResult {
+    pub content: String,
+    pub encoding: String,
 }
 
+/// Read a text file, auto-detecting the encoding.
+///
+/// Order: UTF-8 BOM → UTF-16 LE/BE BOM → strict UTF-8 → GBK fallback.
+/// Non-UTF-8 files (common on Chinese Windows) previously failed hard with
+/// "stream did not contain valid UTF-8"; now they decode lossily via GBK.
+#[tauri::command]
+async fn read_file(path: String) -> Result<ReadFileResult, String> {
+    let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // UTF-8 BOM
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        let content = String::from_utf8_lossy(&bytes[3..]).into_owned();
+        return Ok(ReadFileResult { content, encoding: "UTF-8 (BOM)".into() });
+    }
+    // UTF-16 LE BOM
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        let (cow, _, _) = encoding_rs::UTF_16LE.decode(&bytes[2..]);
+        return Ok(ReadFileResult { content: cow.into_owned(), encoding: "UTF-16 LE".into() });
+    }
+    // UTF-16 BE BOM
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let (cow, _, _) = encoding_rs::UTF_16BE.decode(&bytes[2..]);
+        return Ok(ReadFileResult { content: cow.into_owned(), encoding: "UTF-16 BE".into() });
+    }
+
+    match String::from_utf8(bytes) {
+        Ok(content) => Ok(ReadFileResult { content, encoding: "UTF-8".into() }),
+        Err(err) => {
+            let raw = err.into_bytes();
+            let (cow, _, _) = encoding_rs::GBK.decode(&raw);
+            Ok(ReadFileResult { content: cow.into_owned(), encoding: "GBK".into() })
+        }
+    }
+}
+
+/// Atomic file write: write to a sibling temp file, then rename over the
+/// target. A crash / power loss mid-write can no longer truncate the
+/// original file to zero bytes.
 #[tauri::command]
 async fn write_file(path: String, content: String) -> Result<(), String> {
-    fs::write(&path, &content).map_err(|e| format!("Failed to write file: {}", e))
+    let target = std::path::Path::new(&path);
+    let dir = target.parent().ok_or_else(|| "Invalid path".to_string())?;
+    let file_name = target.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = dir.join(format!(".{}.marknote-tmp", file_name));
+
+    fs::write(&tmp, &content).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("Failed to write file: {}", e)
+    })?;
+    fs::rename(&tmp, target).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("Failed to replace file: {}", e)
+    })?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -30,6 +82,8 @@ async fn open_file_dialog() -> Result<Option<String>, String> {
 async fn save_file_dialog() -> Result<Option<String>, String> {
     let file = AsyncFileDialog::new()
         .add_filter("Markdown", &["md", "markdown"])
+        .add_filter("Plain Text", &["txt"])
+        .add_filter("All Files", &["*"])
         .set_title("Save Markdown File")
         .save_file()
         .await;
@@ -251,6 +305,16 @@ fn restore_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Called by the frontend after it has settled unsaved-tab prompts —
+/// actually destroys the window (CloseRequested was intercepted).
+#[tauri::command]
+async fn confirm_close(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.destroy();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -266,7 +330,16 @@ pub fn run() {
             open_in_folder,
             export_html,
             export_pdf,
+            confirm_close,
         ])
+        // Intercept window close: let the frontend prompt for unsaved tabs,
+        // then it calls `confirm_close` to actually destroy the window.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.emit("close-requested", ());
+            }
+        })
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             for arg in argv.iter() {
                 let lower = arg.to_lowercase();

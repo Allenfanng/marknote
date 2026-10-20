@@ -68,12 +68,17 @@ function App() {
   const [editorKey, setEditorKey] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: string; tabName: string } | null>(null)
+  // 窗口关闭确认（Rust 拦截 CloseRequested 后发 close-requested 事件）
+  const [exitConfirm, setExitConfirm] = useState(false)
   const [fontSize, setFontSize] = useState(getInitialFontSize)
   const [widthMode, setWidthMode] = useState<WidthMode>(getInitialWidthMode)
   // 图表全屏查看：由 diagramPlugin 里的悬浮按钮通过自定义事件唤起
   const [zoomDiagram, setZoomDiagram] = useState<DiagramZoomDetail | null>(null)
   const justLoadedRef = useRef(true)
-  const editorReadyAtRef = useRef(0)
+  // 编辑器 ready 时的归一化内容快照：Milkdown 初始化期会发若干虚假
+  // markdownUpdated（内容 === baseline），据此与用户真实输入区分，
+  // 避免旧「500ms 时间窗」方案在窗口期内吞掉用户输入
+  const editorBaselineRef = useRef<string | null>(null)
   const editorScrollRef = useRef<HTMLElement>(null)
   const sourceTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [EditorModule, setEditorModule] = useState<React.ComponentType<{
@@ -124,7 +129,7 @@ function App() {
   const resetEditor = useCallback(() => {
     setEditorReady(false)
     justLoadedRef.current = true
-    editorReadyAtRef.current = 0
+    editorBaselineRef.current = null
     setEditorKey((k) => k + 1)
   }, [])
 
@@ -195,7 +200,8 @@ function App() {
         switchToTab(existing.id)
         return
       }
-      const text = await invoke<string>('read_file', { path })
+      const res = await invoke<{ content: string; encoding: string }>('read_file', { path })
+      const text = res.content
       let targetTabId: string | undefined
       setTabs((prev) => {
         const soleTab = prev.length === 1 ? prev[0] : null
@@ -207,12 +213,13 @@ function App() {
         ) {
           isFirstStartupFileOpen = false
           targetTabId = soleTab.id
-          return [{ ...soleTab, filePath: path, content: text, sourceContent: text }]
+          return [{ ...soleTab, filePath: path, content: text, sourceContent: text, encoding: res.encoding }]
         }
         const newTab = createTab({
           filePath: path,
           content: text,
           sourceContent: text,
+          encoding: res.encoding,
         })
         targetTabId = newTab.id
         return [...prev, newTab]
@@ -226,6 +233,7 @@ function App() {
       invoke('add_recent_file', { path }).catch(console.error)
     } catch (e) {
       console.error('Failed to load file:', e)
+      alert('打开文件失败：' + path + '\n\n' + e)
     }
   }, [switchToTab, captureViewState, resetEditor])
 
@@ -261,6 +269,66 @@ function App() {
       unlisten?.()
     }
   }, [loadFile])
+
+  // 窗口 X：Rust 侧已 prevent_close，这里检查未保存标签，确认后才真正销毁
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    async function setup() {
+      try {
+        const fn = await listen('close-requested', () => {
+          const dirty = tabsRef.current.filter((t) => t.isDirty)
+          if (dirty.length > 0) {
+            setExitConfirm(true)
+          } else {
+            invoke('confirm_close').catch(console.error)
+          }
+        })
+        if (!cancelled) unlisten = fn
+        else fn()
+      } catch (e) {
+        console.error('close-requested listener failed:', e)
+      }
+    }
+    setup()
+    return () => { cancelled = true; unlisten?.() }
+  }, [])
+
+  // 「保存并退出」：逐个保存未保存标签（未落盘的依次弹另存对话框），全部成功才退出
+  const handleExitSave = useCallback(async () => {
+    setExitConfirm(false)
+    const dirtyTabs = tabsRef.current.filter((t) => t.isDirty).map((t) => ({ ...t }))
+    let failed = false
+    for (const tab of dirtyTabs) {
+      let content = tab.viewMode === 'source' ? tab.sourceContent : tab.content
+      if (tab.id === activeTabIdRef.current && tab.viewMode === 'wysiwyg' && editorRef.current?.ready) {
+        content = editorRef.current.getMarkdown()
+      }
+      let path = tab.filePath
+      if (!path) {
+        try {
+          path = await invoke<string | null>('save_file_dialog')
+          if (!path) return // 用户取消保存 → 中止整个退出
+        } catch {
+          return
+        }
+      }
+      try {
+        await invoke('write_file', { path, content })
+        updateTab(tab.id, { filePath: path, isDirty: false })
+      } catch (e) {
+        failed = true
+        console.error('Save on exit failed:', e)
+        alert('保存失败，已取消退出：' + path + '\n\n' + e)
+      }
+    }
+    if (!failed) invoke('confirm_close').catch(console.error)
+  }, [updateTab])
+
+  const handleExitDiscard = useCallback(() => {
+    setExitConfirm(false)
+    invoke('confirm_close').catch(console.error)
+  }, [])
 
   const handleExportHtml = useCallback(async () => {
     try {
@@ -330,9 +398,17 @@ function App() {
       }
 
       await invoke('write_file', { path, content })
-      updateTab(tab.id, { filePath: path, content, isDirty: false })
+      // 竞态防御：若保存期间用户又输入了新内容，不清 isDirty、不回写旧内容
+      const current = tabsRef.current.find((t) => t.id === tab.id)
+      const currentContent = current
+        ? (current.viewMode === 'source' ? current.sourceContent : current.content)
+        : content
+      if (currentContent === content) {
+        updateTab(tab.id, { filePath: path, isDirty: false })
+      }
     } catch (e) {
       console.error('Save failed:', e)
+      alert('保存失败：' + e)
     }
   }, [updateTab])
 
@@ -417,9 +493,12 @@ function App() {
 
   const handleEditorChange = useCallback((markdown: string) => {
     if (justLoadedRef.current) return
-    // Grace period: skip spurious markdownUpdated events fired right after the
-    // editor becomes ready (Milkdown emits them during initial normalization).
-    if (editorReadyAtRef.current && Date.now() - editorReadyAtRef.current < 500) return
+    // 宽限期：与 baseline（ready 时的归一化内容）相同的是初始化虚假回调；
+    // 不同的一定是用户真实输入，不能丢——立即退出宽限期并正常入账
+    if (editorBaselineRef.current !== null) {
+      if (markdown === editorBaselineRef.current) return
+      editorBaselineRef.current = null
+    }
     updateTab(activeTabIdRef.current, { content: markdown, isDirty: true })
   }, [updateTab])
 
@@ -445,16 +524,32 @@ function App() {
     }
   }, [captureViewState, updateTab, resetEditor])
 
-  // Auto-save every 3 minutes
+  // Auto-save every 3 minutes — now covers ALL dirty tabs with a file path,
+  // not just the active one (previously a background dirty tab was never saved)
   useEffect(() => {
-    const id = setInterval(() => {
-      const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
-      if (tab?.isDirty && tab.filePath) {
-        handleSave()
+    const id = setInterval(async () => {
+      for (const tab of tabsRef.current) {
+        if (!tab.isDirty || !tab.filePath) continue
+        let content = tab.viewMode === 'source' ? tab.sourceContent : tab.content
+        // 活动 WYSIWYG 标签直接取编辑器最新内容（state 可能滞后于打字）
+        if (tab.id === activeTabIdRef.current && tab.viewMode === 'wysiwyg' && editorRef.current?.ready) {
+          content = editorRef.current.getMarkdown()
+        }
+        try {
+          await invoke('write_file', { path: tab.filePath, content })
+          // 竞态防御：保存期间用户又改过就保持 isDirty
+          const current = tabsRef.current.find((t) => t.id === tab.id)
+          const currentContent = current
+            ? (current.viewMode === 'source' ? current.sourceContent : current.content)
+            : content
+          if (currentContent === content) updateTab(tab.id, { isDirty: false })
+        } catch (e) {
+          console.error('Auto-save failed:', tab.filePath, e)
+        }
       }
     }, AUTO_SAVE_INTERVAL)
     return () => clearInterval(id)
-  }, [handleSave])
+  }, [saveCurrentEditorContent, updateTab])
 
   // Poll for editor readiness
   useEffect(() => {
@@ -462,8 +557,9 @@ function App() {
     const id = setInterval(() => {
       if (editorRef.current?.ready) {
         setEditorReady(true)
-        editorReadyAtRef.current = Date.now()
-        // Release justLoadedRef now; the 500ms timestamp guard in
+        // 记录归一化 baseline，宽限期内据此过滤 Milkdown 的虚假回调
+        editorBaselineRef.current = editorRef.current.getMarkdown()
+        // Release justLoadedRef now; the baseline comparison in
         // handleEditorChange absorbs Milkdown's spurious init-time
         // markdownUpdated callbacks (fixes false "modified" state).
         justLoadedRef.current = false
@@ -723,19 +819,52 @@ function App() {
           </div>
         </dialog>
       )}
+      {exitConfirm && (
+        <dialog
+          open
+          className="close-confirm-dialog"
+          onClick={(e) => { if (e.target === e.currentTarget) setExitConfirm(false) }}
+        >
+          <div className="close-confirm-content">
+            <p>有未保存的文档，退出前要保存吗？</p>
+            <div className="close-confirm-actions">
+              <button className="close-confirm-btn primary" onClick={handleExitSave}>保存并退出</button>
+              <button className="close-confirm-btn" onClick={handleExitDiscard}>直接退出</button>
+              <button className="close-confirm-btn" onClick={() => setExitConfirm(false)}>取消</button>
+            </div>
+          </div>
+        </dialog>
+      )}
     </div>
   )
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Filter an already-HTML-escaped URL for use in href/src attributes.
+ * Blocks javascript:/vbscript: style injection; data: is only allowed for
+ * inline images (data:image/...).
+ */
+function safeUrl(escapedUrl: string, allowDataImage = false): string {
+  const u = escapedUrl.trim().replace(/&amp;/g, '&').toLowerCase()
+  if (/^(javascript|vbscript):/.test(u)) return '#'
+  if (u.startsWith('data:') && !(allowDataImage && /^data:image\//.test(u))) return '#'
+  return escapedUrl
 }
 
 // Inline formatting applied to table cell text (already HTML-escaped).
 function applyInline(s: string): string {
   return s
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => `<a href="${safeUrl(url)}">${text}</a>`)
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
     .replace(/~~([^~]+)~~/g, '<del>$1</del>')
@@ -790,10 +919,10 @@ export function markdownToHtml(md: string, diagramBlocks: string[] = []): string
   const html = escapeHtml(body)
     // Inline code
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    // Images
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />')
+    // Images (data:image/ URIs allowed, javascript: and other data: blocked)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) => `<img src="${safeUrl(url, true)}" alt="${alt}" />`)
     // Links
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => `<a href="${safeUrl(url)}">${text}</a>`)
     // Headings
     .replace(/^### (.+)$/gm, '<h3>$1</h3>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')

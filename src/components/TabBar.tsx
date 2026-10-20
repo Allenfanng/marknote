@@ -19,6 +19,8 @@ export interface Tab {
   isDirty: boolean
   viewMode: 'wysiwyg' | 'source'
   viewState?: TabViewState
+  /** 文件打开时检测到的编码（UTF-8 / UTF-8 (BOM) / UTF-16 / GBK） */
+  encoding?: string
 }
 
 interface TabBarProps {
