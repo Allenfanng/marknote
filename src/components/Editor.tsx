@@ -302,8 +302,11 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
         'list-item': false,
         'image-block': false,
         placeholder: false,
-        'code-mirror': false,
-        // v1.9 起开启 LaTeX 数学公式（$...$ / $$...$$），KaTeX 渲染
+        // code-mirror 必须开启：Crepe 的 LaTeX 特性硬依赖它
+        //（关闭时构建 editor 会抛 "You need to enable CodeMirror to use LaTeX feature"，
+        // 整个编辑器初始化失败 → getMarkdown 抛错 → 源码模式切不进去）。
+        // 附带收益：代码块有语法高亮、手打 ``` 围栏可创建代码块（v1.7.0 的老限制一并解除）
+        'code-mirror': true,
         latex: true,
       },
       featureConfigs: {

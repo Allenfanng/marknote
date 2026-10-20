@@ -175,11 +175,29 @@ function App() {
     )
   }, [])
 
+  /**
+   * 读取编辑器里的最新 markdown。
+   * 编辑器未就绪或内部异常时返回 null —— 调用方回退到 tab 里的缓存内容，
+   * 绝不让编辑器故障阻塞保存/切换视图等文件操作
+   * （v1.9.0 踩坑：Crepe 配置冲突导致 editor 初始化失败，getMarkdown 抛错
+   *   直接中断了 toggleViewMode，源码模式点不进去）
+   */
+  const readEditorMarkdown = useCallback((): string | null => {
+    const handle = editorRef.current
+    if (!handle?.ready) return null
+    try {
+      return handle.getMarkdown()
+    } catch (e) {
+      console.error('getMarkdown failed:', e)
+      return null
+    }
+  }, [])
+
   const saveCurrentEditorContent = useCallback(() => {
-    if (!editorRef.current?.ready) return
-    const md = editorRef.current.getMarkdown()
+    const md = readEditorMarkdown()
+    if (md === null) return
     updateTab(activeTabIdRef.current, { content: md })
-  }, [updateTab])
+  }, [updateTab, readEditorMarkdown])
 
   const resetEditor = useCallback(() => {
     setEditorReady(false)
@@ -489,8 +507,8 @@ function App() {
     let failed = false
     for (const tab of dirtyTabs) {
       let content = tab.viewMode === 'source' ? tab.sourceContent : tab.content
-      if (tab.id === activeTabIdRef.current && tab.viewMode === 'wysiwyg' && editorRef.current?.ready) {
-        content = editorRef.current.getMarkdown()
+      if (tab.id === activeTabIdRef.current && tab.viewMode === 'wysiwyg') {
+        content = readEditorMarkdown() ?? content
       }
       let path = tab.filePath
       if (!path) {
@@ -515,7 +533,7 @@ function App() {
     invoke('save_session', { session: serializeSession(tabsRef.current, activeTabIdRef.current) })
       .catch(console.error)
     invoke('confirm_close').catch(console.error)
-  }, [updateTab])
+  }, [updateTab, readEditorMarkdown])
 
   const handleExitDiscard = useCallback(() => {
     setExitConfirm(false)
@@ -528,8 +546,8 @@ function App() {
     try {
       const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
       if (!tab) return
-      const md = tab.viewMode === 'wysiwyg' && editorRef.current?.ready
-        ? editorRef.current.getMarkdown()
+      const md = tab.viewMode === 'wysiwyg'
+        ? (readEditorMarkdown() ?? tab.content)
         : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
       const { text, blocks } = await prepareDiagrams(md)
       const html = renderMarkdown(text, blocks)
@@ -539,14 +557,14 @@ function App() {
       console.error('Export HTML failed:', e)
       alert('导出 HTML 失败：' + e)
     }
-  }, [])
+  }, [readEditorMarkdown])
 
   const handleExportPdf = useCallback(async () => {
     try {
       const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
       if (!tab) return
-      const md = tab.viewMode === 'wysiwyg' && editorRef.current?.ready
-        ? editorRef.current.getMarkdown()
+      const md = tab.viewMode === 'wysiwyg'
+        ? (readEditorMarkdown() ?? tab.content)
         : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
       const { text, blocks } = await prepareDiagrams(md)
       const html = renderMarkdown(text, blocks)
@@ -556,7 +574,7 @@ function App() {
       console.error('Export PDF failed:', e)
       alert('导出 PDF 失败：' + e + '\n\n将在浏览器中打开，请在打印对话框中选择"另存为 PDF"。')
     }
-  }, [])
+  }, [readEditorMarkdown])
 
   const handleOpen = useCallback(async () => {
     try {
@@ -579,8 +597,8 @@ function App() {
       if (!tab) return
 
       let content: string
-      if (tab.viewMode === 'wysiwyg' && editorRef.current?.ready) {
-        content = editorRef.current.getMarkdown()
+      if (tab.viewMode === 'wysiwyg') {
+        content = readEditorMarkdown() ?? tab.content
       } else {
         content = tab.viewMode === 'source' ? tab.sourceContent : tab.content
       }
@@ -605,7 +623,7 @@ function App() {
       console.error('Save failed:', e)
       alert('保存失败：' + e)
     }
-  }, [updateTab])
+  }, [updateTab, readEditorMarkdown])
 
   const handleNewTab = useCallback(() => {
     captureViewState()
@@ -711,13 +729,14 @@ function App() {
     // 两种方向都先记住当前模式的位置（WYSIWYG ↔ 源码各自独立记忆）
     captureViewState()
     if (tab.viewMode === 'wysiwyg') {
-      const md = editorRef.current?.getMarkdown() ?? tab.content
+      // 编辑器故障时回退到 tab 缓存内容，保证源码模式一定能进
+      const md = readEditorMarkdown() ?? tab.content
       updateTab(tab.id, { viewMode: 'source', sourceContent: md })
     } else {
       updateTab(tab.id, { viewMode: 'wysiwyg', content: tab.sourceContent })
       resetEditor()
     }
-  }, [captureViewState, updateTab, resetEditor])
+  }, [captureViewState, updateTab, resetEditor, readEditorMarkdown])
 
   // Auto-save every 3 minutes — now covers ALL dirty tabs with a file path,
   // not just the active one (previously a background dirty tab was never saved)
@@ -727,8 +746,8 @@ function App() {
         if (!tab.isDirty || !tab.filePath) continue
         let content = tab.viewMode === 'source' ? tab.sourceContent : tab.content
         // 活动 WYSIWYG 标签直接取编辑器最新内容（state 可能滞后于打字）
-        if (tab.id === activeTabIdRef.current && tab.viewMode === 'wysiwyg' && editorRef.current?.ready) {
-          content = editorRef.current.getMarkdown()
+        if (tab.id === activeTabIdRef.current && tab.viewMode === 'wysiwyg') {
+          content = readEditorMarkdown() ?? content
         }
         try {
           await invoke('write_file', { path: tab.filePath, content })
@@ -745,7 +764,7 @@ function App() {
       }
     }, AUTO_SAVE_INTERVAL)
     return () => clearInterval(id)
-  }, [saveCurrentEditorContent, updateTab])
+  }, [saveCurrentEditorContent, updateTab, readEditorMarkdown])
 
   // Poll for editor readiness
   useEffect(() => {
@@ -756,7 +775,7 @@ function App() {
         // handle 提升为 state 供 Toolbar/TableControls 订阅
         setEditorHandle(editorRef.current)
         // 记录归一化 baseline，宽限期内据此过滤 Milkdown 的虚假回调
-        editorBaselineRef.current = editorRef.current.getMarkdown()
+        editorBaselineRef.current = readEditorMarkdown()
         // Release justLoadedRef now; the baseline comparison in
         // handleEditorChange absorbs Milkdown's spurious init-time
         // markdownUpdated callbacks (fixes false "modified" state).
@@ -765,7 +784,7 @@ function App() {
       }
     }, 100)
     return () => clearInterval(id)
-  }, [editorReady, activeViewMode])
+  }, [editorReady, activeViewMode, readEditorMarkdown])
 
   // 切换标签页 / 视图模式后立即按记忆值定位：源码模式直接恢复 textarea 的
   // 光标与滚动；WYSIWYG 此时容器里还是即时预览，先大致定位，编辑器就绪后
