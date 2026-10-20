@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -848,6 +848,21 @@ function App() {
       } else if (mod && e.key === 'n') {
         e.preventDefault()
         handleNewTab()
+      } else if (mod && e.key === 't') {
+        e.preventDefault()
+        handleNewTab()
+      } else if (mod && e.key === 'w') {
+        e.preventDefault()
+        if (activeTabIdRef.current) handleTabClose(activeTabIdRef.current)
+      } else if (mod && e.key === 'Tab') {
+        e.preventDefault()
+        const list = tabsRef.current
+        if (list.length < 2) return
+        const idx = list.findIndex((t) => t.id === activeTabIdRef.current)
+        if (idx < 0) return
+        const dir = e.shiftKey ? -1 : 1
+        const nextIdx = (idx + dir + list.length) % list.length
+        switchToTab(list[nextIdx].id)
       } else if (mod && e.key === '/') {
         e.preventDefault()
         toggleViewMode()
@@ -862,7 +877,7 @@ function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleSave, handleOpen, handleNewTab, toggleViewMode])
+  }, [handleSave, handleOpen, handleNewTab, toggleViewMode, handleTabClose, switchToTab])
 
   // Tauri v2 drag-drop — .md opens in a tab; images land in the editor
   useEffect(() => {
@@ -918,9 +933,89 @@ function App() {
     }
   }, [loadFile, switchToTab])
 
+  // 标签拖拽排序
+  const handleReorderTabs = useCallback((fromId: string, toId: string) => {
+    setTabs((prev) => {
+      const from = prev.findIndex((t) => t.id === fromId)
+      const to = prev.findIndex((t) => t.id === toId)
+      if (from < 0 || to < 0) return prev
+      const next = [...prev]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      return next
+    })
+  }, [])
+
+  // 关闭其他 / 关闭右侧：未保存标签跳过并提示（避免无声丢失）
+  const handleCloseOthers = useCallback((tabId: string) => {
+    const others = tabsRef.current.filter((t) => t.id !== tabId)
+    const skipped = others.filter((t) => t.isDirty).length
+    setTabs((prev) => prev.filter((t) => t.id === tabId || t.isDirty))
+    if (skipped > 0) alert(`${skipped} 个未保存标签已跳过（请单独关闭并保存）`)
+    if (!others.some((t) => t.id === activeTabIdRef.current && t.isDirty)) {
+      if (activeTabIdRef.current !== tabId) switchToTab(tabId)
+    }
+  }, [switchToTab])
+
+  const handleCloseToRight = useCallback((tabId: string) => {
+    const idx = tabsRef.current.findIndex((t) => t.id === tabId)
+    if (idx < 0) return
+    const right = tabsRef.current.slice(idx + 1)
+    if (right.length === 0) return
+    const skipped = right.filter((t) => t.isDirty).length
+    setTabs((prev) => prev.filter((t) => {
+      const i = prev.findIndex((x) => x.id === t.id)
+      return i <= idx || t.isDirty
+    }))
+    if (skipped > 0) alert(`${skipped} 个未保存标签已跳过（请单独关闭并保存）`)
+    if (!right.some((t) => t.id === activeTabIdRef.current && t.isDirty)) {
+      if (activeTabIdRef.current !== tabId) switchToTab(tabId)
+    }
+  }, [switchToTab])
+
   const currentContent = !activeTab
     ? ''
     : (activeTab.viewMode === 'source' ? activeTab.sourceContent : activeTab.content)
+
+  // 文档大纲标题（ATX 风格；代码块内的 # 不误判）
+  const outlineHeadings = useMemo(() => {
+    const out: Array<{ level: number; text: string }> = []
+    let inFence = false
+    for (const line of currentContent.split('\n')) {
+      const trimmed = line.trimStart()
+      if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; continue }
+      if (inFence) continue
+      const m = line.match(/^(#{1,6})\s+(.*)$/)
+      if (m) out.push({ level: m[1].length, text: m[2].replace(/\s+#+\s*$/, '').trim() })
+    }
+    return out
+  }, [currentContent])
+
+  // 大纲跳转：WYSIWYG 滚动到标题节点；源码模式定位到对应行
+  const handleTocClick = useCallback((text: string) => {
+    if (activeTab?.viewMode === 'wysiwyg') {
+      editorRef.current?.scrollToHeading(text)
+      return
+    }
+    const ta = sourceTextareaRef.current
+    if (!ta) return
+    const lines = ta.value.split('\n')
+    let inFence = false
+    let lineIdx = -1
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i].trimStart()
+      if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; continue }
+      if (inFence) continue
+      const m = lines[i].match(/^(#{1,6})\s+(.*)$/)
+      if (m && m[2].replace(/\s+#+\s*$/, '').trim() === text) { lineIdx = i; break }
+    }
+    if (lineIdx < 0) return
+    ta.focus()
+    const start = lines.slice(0, lineIdx).join('\n').length + (lineIdx > 0 ? 1 : 0)
+    ta.setSelectionRange(start, start)
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 22
+    ta.scrollTop = Math.max(0, lineIdx * lineHeight - ta.clientHeight / 3)
+  }, [activeTab?.viewMode])
 
   return (
     <div className="app" data-width-mode={widthMode}>
@@ -936,6 +1031,9 @@ function App() {
         onToggleViewMode={toggleViewMode}
         widthMode={widthMode}
         onToggleWidthMode={toggleWidthMode}
+        onReorder={handleReorderTabs}
+        onCloseOthers={handleCloseOthers}
+        onCloseToRight={handleCloseToRight}
       />
       <Toolbar
         editor={editorRef.current}
@@ -954,6 +1052,8 @@ function App() {
             filePath={activeTab?.filePath ?? null}
             theme={theme}
             onFileOpen={handleSidebarFileOpen}
+            outlineHeadings={outlineHeadings}
+            onTocClick={handleTocClick}
           />
         )}
         <div

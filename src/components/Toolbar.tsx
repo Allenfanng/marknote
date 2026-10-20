@@ -46,6 +46,11 @@ const defaultActive: ActiveState = {
   blockquote: false,
 }
 
+/** 逐字段比较：值没变就不 setState，避免空闲时无意义重渲染 */
+function sameActive(a: ActiveState, b: ActiveState): boolean {
+  return (Object.keys(a) as (keyof ActiveState)[]).every((k) => a[k] === b[k])
+}
+
 const TABLE_DIMENSION_MAX = 50
 
 function clampDimension(value: number): number {
@@ -74,7 +79,8 @@ export default function Toolbar({
     if (!editor || disabled) return
     const id = setInterval(() => {
       try {
-        setActive(editor.getActiveState())
+        const next = editor.getActiveState()
+        setActive((prev) => (sameActive(prev, next) ? prev : next))
       } catch {
         // editor may not be ready
       }

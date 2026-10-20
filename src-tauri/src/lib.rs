@@ -154,7 +154,8 @@ async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
     let content = fs::read_to_string(&recent_path)
         .map_err(|e| format!("Failed to read recent files: {}", e))?;
     let files: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
-    Ok(files)
+    // 过滤已不存在（被删除/移动）的路径
+    Ok(files.into_iter().filter(|p| std::path::Path::new(p).exists()).collect())
 }
 
 #[tauri::command]
@@ -290,10 +291,35 @@ async fn export_pdf(markdown: String, css: String) -> Result<(), String> {
 </html>"#);
     let tmp_dir = std::env::temp_dir().join("marknote-export");
     fs::create_dir_all(&tmp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
-    let file_path = tmp_dir.join("document.html");
+
+    // 清理 24 小时前的导出临时文件，防止无限累积
+    if let Ok(entries) = fs::read_dir(&tmp_dir) {
+        for entry in entries.flatten() {
+            let is_old = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() < now_secs() - 24 * 3600)
+                .unwrap_or(false);
+            if is_old {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    // 唯一文件名：连续导出不再互相覆盖
+    let file_path = tmp_dir.join(format!("document-{}.html", now_secs()));
     fs::write(&file_path, &html).map_err(|e| format!("Failed to write HTML: {}", e))?;
     open::that(&file_path).map_err(|e| format!("Failed to open browser: {}", e))?;
     Ok(())
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Restore + focus the main window (used by single-instance & file-open paths).

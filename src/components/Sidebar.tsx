@@ -1,16 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { FolderOpen, Clock, FileText } from 'lucide-react'
+import { FolderOpen, Clock, FileText, List } from 'lucide-react'
 
 interface SidebarProps {
   filePath: string | null
   theme: 'light' | 'dark'
   onFileOpen: (path: string) => void
+  /** 文档标题大纲（App 层从当前内容解析） */
+  outlineHeadings?: Array<{ level: number; text: string }>
+  onTocClick?: (text: string) => void
 }
 
-type Tab = 'directory' | 'recent'
+type Tab = 'directory' | 'recent' | 'outline'
 
-export default function Sidebar({ filePath, theme, onFileOpen }: SidebarProps) {
+export default function Sidebar({ filePath, theme, onFileOpen, outlineHeadings, onTocClick }: SidebarProps) {
   const [tab, setTab] = useState<Tab>('directory')
   const [dirFiles, setDirFiles] = useState<string[]>([])
   const [recentFiles, setRecentFiles] = useState<string[]>([])
@@ -48,7 +51,7 @@ export default function Sidebar({ filePath, theme, onFileOpen }: SidebarProps) {
 
   useEffect(() => {
     if (tab === 'directory') loadDirFiles()
-    else loadRecentFiles()
+    else if (tab === 'recent') loadRecentFiles()
   }, [tab, loadDirFiles, loadRecentFiles])
 
   // Refresh directory when filePath changes
@@ -77,25 +80,54 @@ export default function Sidebar({ filePath, theme, onFileOpen }: SidebarProps) {
         >
           <Clock size={14} />
         </button>
+        <button
+          className={`sidebar-tab ${tab === 'outline' ? 'active' : ''}`}
+          onClick={() => setTab('outline')}
+          data-tooltip="文档大纲"
+        >
+          <List size={14} />
+        </button>
       </div>
       <div className="sidebar-content">
-        {error && <div className="sidebar-error">{error}</div>}
-        {files.length === 0 && !error && (
-          <div className="sidebar-empty">
-            {tab === 'directory' ? '打开文件以查看目录' : '暂无最近文件'}
-          </div>
+        {tab === 'outline' ? (
+          <>
+            {(!outlineHeadings || outlineHeadings.length === 0) && (
+              <div className="sidebar-empty">文档中没有标题</div>
+            )}
+            {(outlineHeadings ?? []).map((h, i) => (
+              <button
+                key={`${h.level}-${i}`}
+                className="sidebar-outline-item"
+                style={{ paddingLeft: 8 + (h.level - 1) * 12 }}
+                onClick={() => onTocClick?.(h.text)}
+                title={h.text}
+              >
+                <span className={`sidebar-outline-level sidebar-outline-l${h.level}`}>{h.level}</span>
+                <span className="sidebar-outline-text">{h.text}</span>
+              </button>
+            ))}
+          </>
+        ) : (
+          <>
+            {error && <div className="sidebar-error">{error}</div>}
+            {files.length === 0 && !error && (
+              <div className="sidebar-empty">
+                {tab === 'directory' ? '打开文件以查看目录' : '暂无最近文件'}
+              </div>
+            )}
+            {files.map((file) => (
+              <button
+                key={file}
+                className={`sidebar-file-item ${file === filePath ? 'current' : ''}`}
+                onClick={() => onFileOpen(file)}
+                title={file}
+              >
+                <FileText size={14} />
+                <span className="sidebar-file-name">{getFileName(file)}</span>
+              </button>
+            ))}
+          </>
         )}
-        {files.map((file) => (
-          <button
-            key={file}
-            className={`sidebar-file-item ${file === filePath ? 'current' : ''}`}
-            onClick={() => onFileOpen(file)}
-            title={file}
-          >
-            <FileText size={14} />
-            <span className="sidebar-file-name">{getFileName(file)}</span>
-          </button>
-        ))}
       </div>
     </div>
   )

@@ -39,6 +39,12 @@ interface TabBarProps {
   onToggleViewMode: () => void
   widthMode: WidthMode
   onToggleWidthMode: () => void
+  /** 拖拽排序：把 fromId 拖到 toId 的位置 */
+  onReorder?: (fromId: string, toId: string) => void
+  /** 关闭除 tabId 外的标签（未保存的跳过） */
+  onCloseOthers?: (tabId: string) => void
+  /** 关闭 tabId 右侧的标签（未保存的跳过） */
+  onCloseToRight?: (tabId: string) => void
 }
 
 interface ContextMenuState {
@@ -59,11 +65,17 @@ export default function TabBar({
   onToggleViewMode,
   widthMode,
   onToggleWidthMode,
+  onReorder,
+  onCloseOthers,
+  onCloseToRight,
 }: TabBarProps) {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const tabsRef = useRef<HTMLDivElement>(null)
   const lastWheelSwitchAt = useRef(0)
+  // 拖拽排序状态
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!contextMenu) return
@@ -147,10 +159,29 @@ export default function TabBar({
           return (
             <div
               key={tab.id}
-              className={`tab-item ${isActive ? 'active' : ''}`}
+              className={`tab-item ${isActive ? 'active' : ''}${dragId === tab.id ? ' dragging' : ''}${dropTargetId === tab.id ? ' drop-target' : ''}`}
               onClick={() => onTabClick(tab.id)}
               onContextMenu={(e) => handleContextMenu(e, tab)}
               title={tab.filePath ?? '未命名'}
+              draggable
+              onDragStart={(e) => {
+                setDragId(tab.id)
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', tab.id)
+              }}
+              onDragOver={(e) => {
+                if (!dragId || dragId === tab.id) return
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+                setDropTargetId(tab.id)
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                if (dragId && dragId !== tab.id) onReorder?.(dragId, tab.id)
+                setDragId(null)
+                setDropTargetId(null)
+              }}
+              onDragEnd={() => { setDragId(null); setDropTargetId(null) }}
             >
               <span className="tab-name">{fileName}</span>
               {tab.isDirty && <span className="tab-dirty-dot" />}
@@ -217,6 +248,31 @@ export default function TabBar({
           >
             <Copy size={14} />
             <span>复制文件路径</span>
+          </button>
+          <div className="context-menu-divider" />
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              setContextMenu(null)
+              onCloseOthers?.(contextMenu.tab.id)
+            }}
+            disabled={tabs.length < 2}
+            title="未保存的标签会被跳过"
+          >
+            <XCircle size={14} />
+            <span>关闭其他标签页</span>
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              setContextMenu(null)
+              onCloseToRight?.(contextMenu.tab.id)
+            }}
+            disabled={contextMenu.tab.id === tabs[tabs.length - 1]?.id}
+            title="未保存的标签会被跳过"
+          >
+            <XCircle size={14} />
+            <span>关闭右侧标签页</span>
           </button>
           <div className="context-menu-divider" />
           <button

@@ -158,6 +158,8 @@ export interface EditorHandle {
   runTableOp: (op: TableOp, index: number, tablePos: number) => void
   /** 主题切换后让图表按新配色重绘 */
   setTheme: (theme: 'light' | 'dark') => void
+  /** 大纲跳转：滚动到指定标题并同步光标 */
+  scrollToHeading: (text: string) => void
   /** 查找替换（WYSIWYG）：设置查询词并重算匹配 */
   findSetQuery: (query: string, caseSensitive: boolean) => void
   /** 查找替换（WYSIWYG）：当前匹配总数与激活下标（无匹配时 active 为 -1） */
@@ -301,7 +303,8 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
         'image-block': false,
         placeholder: false,
         'code-mirror': false,
-        latex: false,
+        // v1.9 起开启 LaTeX 数学公式（$...$ / $$...$$），KaTeX 渲染
+        latex: true,
       },
       featureConfigs: {
         cursor: { virtual: false },
@@ -419,6 +422,24 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
       get()?.action((ctx) => {
         const view = ctx.get(editorViewCtx)
         view.dispatch(view.state.tr.setMeta(diagramPluginKey, t))
+      })
+    },
+
+    scrollToHeading: (text) => {
+      get()?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        view.state.doc.descendants((node, pos) => {
+          if (node.type.name !== 'heading') return true
+          if (node.textContent !== text) return true
+          const dom = view.nodeDOM(pos)
+          if (dom instanceof HTMLElement) {
+            dom.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            const $p = view.state.doc.resolve(pos + 1)
+            view.dispatch(view.state.tr.setSelection(TextSelection.near($p)))
+          }
+          return false
+        })
+        view.focus()
       })
     },
 
