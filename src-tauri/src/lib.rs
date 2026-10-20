@@ -315,6 +315,112 @@ async fn confirm_close(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Persist the editing session (open tabs, view modes, unsaved drafts) as an
+/// opaque JSON blob. Structure is owned by the frontend; Rust just stores it.
+#[tauri::command]
+async fn save_session(app: tauri::AppHandle, session: String) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
+    let path = data_dir.join("session.json");
+    // Atomic write, same strategy as write_file
+    let tmp = data_dir.join(".session.json.marknote-tmp");
+    fs::write(&tmp, &session).map_err(|e| format!("Failed to write session: {}", e))?;
+    fs::rename(&tmp, &path).map_err(|e| format!("Failed to replace session: {}", e))?;
+    Ok(())
+}
+
+/// Read the persisted session blob. None when never saved.
+#[tauri::command]
+async fn get_session(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let data_dir = app.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let path = data_dir.join("session.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read session: {}", e))?;
+    Ok(Some(content))
+}
+
+/// Copy an image file (dragged in from Explorer) into `<doc dir>/assets/`,
+/// returning the path relative to the document dir.
+#[tauri::command]
+async fn copy_image_asset(src_path: String, dir: String) -> Result<String, String> {
+    let ext = std::path::Path::new(&src_path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_else(|| "png".into());
+    let name = image_file_name(&ext);
+    let assets = std::path::Path::new(&dir).join("assets");
+    fs::create_dir_all(&assets).map_err(|e| format!("Failed to create assets dir: {}", e))?;
+    let target = assets.join(&name);
+    fs::copy(&src_path, &target).map_err(|e| format!("Failed to copy image: {}", e))?;
+    Ok(format!("assets/{}", name))
+}
+
+/// Human-friendly unique image file name: img-YYYYMMDD-HHMMSS-xxxx.<ext>
+fn image_file_name(ext: &str) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    let rand = (now.subsec_nanos() % 0x10000) as u16;
+    // 手写时间格式化（避免引入 chrono）：epoch → 天数级展开
+    let (y, mo, d, h, mi, s) = epoch_to_datetime(secs);
+    format!("img-{:04}{:02}{:02}-{:02}{:02}{:02}-{:04x}.{}", y, mo, d, h, mi, s, rand, ext)
+}
+
+/// UTC 民用时间（本地时区差异对本用途无关紧要——只是文件名）
+fn epoch_to_datetime(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
+    let days = secs / 86400;
+    let rem = secs % 86400;
+    let (h, mi, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    // days since 1970-01-01 → 民用日期（Howard Hinnant 的 civil_from_days 算法）
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z % 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d, h, mi, s)
+}
+
+/// Save a pasted/dropped image next to the document: `<doc dir>/assets/<name>`.
+/// Returns the path relative to the document dir (e.g. `assets/img-xxx.png`).
+/// The frontend falls back to base64 data URIs for unsaved documents.
+#[tauri::command]
+async fn save_image_asset(dir: String, data: Vec<u8>, ext: String) -> Result<String, String> {
+    let assets = std::path::Path::new(&dir).join("assets");
+    fs::create_dir_all(&assets).map_err(|e| format!("Failed to create assets dir: {}", e))?;
+    let safe_ext: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let name = image_file_name(if safe_ext.is_empty() { "png" } else { &safe_ext });
+    let target = assets.join(&name);
+    fs::write(&target, &data).map_err(|e| format!("Failed to write image: {}", e))?;
+    Ok(format!("assets/{}", name))
+}
+
+/// Batch mtime query for external-change detection (frontend polls this).
+/// Returns None for each path that no longer exists.
+#[tauri::command]
+async fn get_file_mtimes(paths: Vec<String>) -> Result<Vec<Option<i64>>, String> {
+    let mut out = Vec::with_capacity(paths.len());
+    for p in &paths {
+        let mtime = fs::metadata(p)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64);
+        out.push(mtime);
+    }
+    Ok(out)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -331,6 +437,11 @@ pub fn run() {
             export_html,
             export_pdf,
             confirm_close,
+            save_session,
+            get_session,
+            save_image_asset,
+            copy_image_asset,
+            get_file_mtimes,
         ])
         // Intercept window close: let the frontend prompt for unsaved tabs,
         // then it calls `confirm_close` to actually destroy the window.

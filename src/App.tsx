@@ -11,7 +11,10 @@ import DiagramViewer from './components/DiagramViewer'
 import SourceView from './components/SourceView'
 import Sidebar from './components/Sidebar'
 import StatusBar from './components/StatusBar'
+import FindReplace from './components/FindReplace'
 import { prepareDiagrams, sanitizeSvg } from './lib/diagram'
+import { getDocDir, resolveImgSrc } from './lib/imgSrc'
+import { copyDroppedImage, isImagePath } from './lib/imageInsert'
 import { DIAGRAM_ZOOM_EVENT, type DiagramZoomDetail } from './lib/diagramActions'
 import './App.css'
 
@@ -40,6 +43,48 @@ function nextTabId() { return `tab-${++tabIdCounter}` }
 function isMarkdownFile(path: string): boolean {
   const lower = path.toLowerCase()
   return MD_EXTENSIONS.some((ext) => lower.endsWith(ext))
+}
+
+/** 查询单个文件 mtime（毫秒）；不存在返回 null */
+async function getFileMtime(path: string): Promise<number | null> {
+  try {
+    const list = await invoke<(number | null)[]>('get_file_mtimes', { paths: [path] })
+    return list[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+/* ---------------- 会话持久化（未保存草稿随标签一起存） ---------------- */
+
+interface SavedSession {
+  activeTabId: string
+  tabs: Array<{
+    filePath: string | null
+    content: string
+    sourceContent: string
+    isDirty: boolean
+    viewMode: 'wysiwyg' | 'source'
+    viewState?: TabViewState
+  }>
+}
+
+function serializeSession(tabs: Tab[], activeTabId: string): string {
+  const session: SavedSession = {
+    activeTabId,
+    tabs: tabs
+      // 无文件且未修改的空白标签没有恢复价值
+      .filter((t) => t.filePath !== null || t.isDirty)
+      .map((t) => ({
+        filePath: t.filePath,
+        content: t.content,
+        sourceContent: t.sourceContent,
+        isDirty: t.isDirty,
+        viewMode: t.viewMode,
+        viewState: t.viewState,
+      })),
+  }
+  return JSON.stringify(session)
 }
 
 function createTab(overrides?: Partial<Tab>): Tab {
@@ -74,6 +119,9 @@ function App() {
   const [widthMode, setWidthMode] = useState<WidthMode>(getInitialWidthMode)
   // 图表全屏查看：由 diagramPlugin 里的悬浮按钮通过自定义事件唤起
   const [zoomDiagram, setZoomDiagram] = useState<DiagramZoomDetail | null>(null)
+  // 查找替换面板（WYSIWYG 与源码模式通用）
+  const [findOpen, setFindOpen] = useState(false)
+  const [findShowReplace, setFindShowReplace] = useState(false)
   const justLoadedRef = useRef(true)
   // 编辑器 ready 时的归一化内容快照：Milkdown 初始化期会发若干虚假
   // markdownUpdated（内容 === baseline），据此与用户真实输入区分，
@@ -85,6 +133,7 @@ function App() {
     defaultValue: string
     onChange: (markdown: string) => void
     editorRef: React.RefObject<EditorHandle | null>
+    docDir: string | null
   }> | null>(null)
 
   // Lazy-load Editor after mount and show window once rendered
@@ -169,6 +218,9 @@ function App() {
     saveCurrentEditorContent()
     setActiveTabId(tabId)
     resetEditor()
+    // 查找面板与标签绑定（WYSIWYG 插件 state 随编辑器重建），切走即关闭
+    setFindOpen(false)
+    setFindShowReplace(false)
   }, [captureViewState, saveCurrentEditorContent, resetEditor])
 
   useEffect(() => {
@@ -202,6 +254,7 @@ function App() {
       }
       const res = await invoke<{ content: string; encoding: string }>('read_file', { path })
       const text = res.content
+      const mtime = await getFileMtime(path)
       let targetTabId: string | undefined
       setTabs((prev) => {
         const soleTab = prev.length === 1 ? prev[0] : null
@@ -213,13 +266,14 @@ function App() {
         ) {
           isFirstStartupFileOpen = false
           targetTabId = soleTab.id
-          return [{ ...soleTab, filePath: path, content: text, sourceContent: text, encoding: res.encoding }]
+          return [{ ...soleTab, filePath: path, content: text, sourceContent: text, encoding: res.encoding, lastMtimeMs: mtime }]
         }
         const newTab = createTab({
           filePath: path,
           content: text,
           sourceContent: text,
           encoding: res.encoding,
+          lastMtimeMs: mtime,
         })
         targetTabId = newTab.id
         return [...prev, newTab]
@@ -244,12 +298,138 @@ function App() {
     if (fileParam) loadFile(fileParam)
   }, [loadFile])
 
+  // 会话恢复：上次打开的标签（含未保存草稿与各自的滚动位置）。
+  // 未修改的文件从磁盘重读最新内容；dirty 文件恢复草稿并保持未保存状态
+  const restoreSession = useCallback(async () => {
+    try {
+      const raw = await invoke<string | null>('get_session')
+      if (!raw) return
+      const parsed = JSON.parse(raw) as SavedSession
+      if (!parsed?.tabs?.length) return
+      const restored: Tab[] = []
+      for (const st of parsed.tabs) {
+        if (!st.filePath) {
+          // 从未保存过的新建文档：恢复草稿
+          restored.push(createTab({
+            content: st.content,
+            sourceContent: st.sourceContent,
+            isDirty: st.isDirty,
+            viewMode: st.viewMode,
+            viewState: st.viewState,
+          }))
+          continue
+        }
+        const mtime = await getFileMtime(st.filePath)
+        if (!st.isDirty) {
+          try {
+            const res = await invoke<{ content: string; encoding: string }>('read_file', { path: st.filePath })
+            restored.push(createTab({
+              filePath: st.filePath,
+              content: res.content,
+              sourceContent: res.content,
+              encoding: res.encoding,
+              viewMode: st.viewMode,
+              viewState: st.viewState,
+              lastMtimeMs: mtime,
+            }))
+          } catch {
+            // 文件已不存在，跳过该标签
+          }
+        } else {
+          // dirty 文件：恢复草稿内容，保留未保存标记
+          restored.push(createTab({
+            filePath: st.filePath,
+            content: st.content,
+            sourceContent: st.sourceContent,
+            isDirty: true,
+            viewMode: st.viewMode,
+            viewState: st.viewState,
+            lastMtimeMs: mtime,
+          }))
+        }
+      }
+      if (restored.length === 0) return
+      isFirstStartupFileOpen = false
+      setTabs(restored)
+      setActiveTabId(restored.find((t) => t.id === parsed.activeTabId)?.id ?? restored[0].id)
+    } catch (e) {
+      console.error('restore session failed:', e)
+    }
+  }, [])
+
+  // 会话保存（标签结构 + 未保存草稿），防抖 2s
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      invoke('save_session', { session: serializeSession(tabs, activeTabId) }).catch(console.error)
+    }, 2000)
+    return () => clearTimeout(handle)
+  }, [tabs, activeTabId])
+
+  // 外部文件变更检测：每 5s 批量查询所有打开文件的 mtime，
+  // 变了就在编辑器顶部提示重新加载/忽略
+  useEffect(() => {
+    const id = setInterval(async () => {
+      const opened = tabsRef.current.filter(
+        (t) => t.filePath !== null && t.lastMtimeMs != null && !t.externalChanged,
+      )
+      if (opened.length === 0) return
+      try {
+        const list = await invoke<(number | null)[]>('get_file_mtimes', {
+          paths: opened.map((t) => t.filePath as string),
+        })
+        opened.forEach((t, i) => {
+          const mtime = list[i]
+          if (mtime != null && mtime !== t.lastMtimeMs) {
+            updateTab(t.id, { externalChanged: true })
+          }
+        })
+      } catch {
+        // 查询失败静默跳过，下一轮再试
+      }
+    }, 5000)
+    return () => clearInterval(id)
+  }, [updateTab])
+
+  // 外部变更提示条：从磁盘重新加载当前标签
+  const handleReloadFromDisk = useCallback(async () => {
+    const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
+    if (!tab?.filePath) return
+    try {
+      const res = await invoke<{ content: string; encoding: string }>('read_file', { path: tab.filePath })
+      const mtime = await getFileMtime(tab.filePath)
+      updateTab(tab.id, {
+        content: res.content,
+        sourceContent: res.content,
+        isDirty: false,
+        encoding: res.encoding,
+        lastMtimeMs: mtime,
+        externalChanged: false,
+        viewState: undefined,
+      })
+      resetEditor()
+    } catch (e) {
+      alert('重新加载失败：' + e)
+    }
+  }, [updateTab, resetEditor])
+
+  // 外部变更提示条：忽略（记住新 mtime，提示消失，保留编辑器内容）
+  const handleIgnoreExternalChange = useCallback(async () => {
+    const tab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
+    if (!tab?.filePath) return
+    const mtime = await getFileMtime(tab.filePath)
+    updateTab(tab.id, { externalChanged: false, lastMtimeMs: mtime })
+  }, [updateTab])
+
   // Listen for file-opened event (file association / OS open)
   useEffect(() => {
     let unlisten: (() => void) | undefined
     let cancelled = false
     async function setup() {
       try {
+        // 会话恢复必须先于 emit('frontend-ready') 完成：frontend-ready 是
+        // Rust 发出 file-opened 的门槛，天然串行化，避免恢复与「双击打开」
+        // 竞态覆盖彼此的标签列表
+        await restoreSession()
         const fn = await listen<string>('file-opened', (event) => {
           loadFile(event.payload)
         })
@@ -268,7 +448,7 @@ function App() {
       cancelled = true
       unlisten?.()
     }
-  }, [loadFile])
+  }, [loadFile, restoreSession])
 
   // 窗口 X：Rust 侧已 prevent_close，这里检查未保存标签，确认后才真正销毁
   useEffect(() => {
@@ -322,11 +502,17 @@ function App() {
         alert('保存失败，已取消退出：' + path + '\n\n' + e)
       }
     }
-    if (!failed) invoke('confirm_close').catch(console.error)
+    if (failed) return
+    // 退出前立即落一次会话（不等 2s 防抖），下次启动恢复现场
+    invoke('save_session', { session: serializeSession(tabsRef.current, activeTabIdRef.current) })
+      .catch(console.error)
+    invoke('confirm_close').catch(console.error)
   }, [updateTab])
 
   const handleExitDiscard = useCallback(() => {
     setExitConfirm(false)
+    invoke('save_session', { session: serializeSession(tabsRef.current, activeTabIdRef.current) })
+      .catch(console.error)
     invoke('confirm_close').catch(console.error)
   }, [])
 
@@ -398,13 +584,14 @@ function App() {
       }
 
       await invoke('write_file', { path, content })
+      const mtime = await getFileMtime(path)
       // 竞态防御：若保存期间用户又输入了新内容，不清 isDirty、不回写旧内容
       const current = tabsRef.current.find((t) => t.id === tab.id)
       const currentContent = current
         ? (current.viewMode === 'source' ? current.sourceContent : current.content)
         : content
       if (currentContent === content) {
-        updateTab(tab.id, { filePath: path, isDirty: false })
+        updateTab(tab.id, { filePath: path, isDirty: false, lastMtimeMs: mtime })
       }
     } catch (e) {
       console.error('Save failed:', e)
@@ -537,12 +724,13 @@ function App() {
         }
         try {
           await invoke('write_file', { path: tab.filePath, content })
+          const mtime = await getFileMtime(tab.filePath)
           // 竞态防御：保存期间用户又改过就保持 isDirty
           const current = tabsRef.current.find((t) => t.id === tab.id)
           const currentContent = current
             ? (current.viewMode === 'source' ? current.sourceContent : current.content)
             : content
-          if (currentContent === content) updateTab(tab.id, { isDirty: false })
+          if (currentContent === content) updateTab(tab.id, { isDirty: false, lastMtimeMs: mtime })
         } catch (e) {
           console.error('Auto-save failed:', tab.filePath, e)
         }
@@ -663,13 +851,20 @@ function App() {
       } else if (mod && e.key === '/') {
         e.preventDefault()
         toggleViewMode()
+      } else if (mod && e.key === 'f') {
+        e.preventDefault()
+        setFindOpen(true)
+      } else if (mod && e.key === 'h') {
+        e.preventDefault()
+        setFindOpen(true)
+        setFindShowReplace(true)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleSave, handleOpen, handleNewTab, toggleViewMode])
 
-  // Tauri v2 drag-drop — open dropped file in a new tab
+  // Tauri v2 drag-drop — .md opens in a tab; images land in the editor
   useEffect(() => {
     const webview = getCurrentWebview()
     const unlistenPromise = webview.onDragDropEvent((event) => {
@@ -685,7 +880,11 @@ function App() {
           } else {
             loadFile(mdFile)
           }
+          return
         }
+        // 拖入图片文件 → 复制到当前文档 assets/ 并插入光标处
+        const imgFiles = event.payload.paths.filter(isImagePath)
+        if (imgFiles.length > 0) void handleDroppedImages(imgFiles)
       } else if (event.payload.type === 'leave') {
         setIsDragging(false)
       }
@@ -694,6 +893,21 @@ function App() {
       unlistenPromise.then((fn) => fn())
     }
   }, [loadFile, switchToTab])
+
+  // 拖入的图片：复制到 assets/ 后经编辑器插入（编辑器未就绪则忽略插入）
+  const handleDroppedImages = useCallback(async (imgPaths: string[]) => {
+    const docDir = getDocDir(activeTabIdRef.current
+      ? tabsRef.current.find((t) => t.id === activeTabIdRef.current)?.filePath ?? null
+      : null)
+    if (!docDir) {
+      alert('请先保存文档（Ctrl+S），再拖入图片 —— 图片将写入文档目录下的 assets/ 文件夹。')
+      return
+    }
+    for (const p of imgPaths) {
+      const rel = await copyDroppedImage(p, docDir)
+      if (rel) editorRef.current?.insertImage(rel)
+    }
+  }, [])
 
   const handleSidebarFileOpen = useCallback((path: string) => {
     const existingTab = tabsRef.current.find((t) => t.filePath === path)
@@ -755,12 +969,32 @@ function App() {
             </div>
           ) : (
             <>
+              {activeTab.externalChanged && (
+                <div className="external-change-banner">
+                  <span>文件已在磁盘上被其他程序修改</span>
+                  <button className="external-change-btn" onClick={() => handleReloadFromDisk()}>重新加载</button>
+                  <button className="external-change-btn ghost" onClick={() => handleIgnoreExternalChange()}>忽略</button>
+                </div>
+              )}
+              {findOpen && (
+                <FindReplace
+                  mode={activeTab.viewMode}
+                  editor={editorRef.current}
+                  editorReady={editorReady}
+                  textareaRef={sourceTextareaRef}
+                  content={activeTab.viewMode === 'source' ? activeTab.sourceContent : activeTab.content}
+                  onChange={handleSourceChange}
+                  showReplace={findShowReplace}
+                  onToggleShowReplace={setFindShowReplace}
+                  onClose={() => setFindOpen(false)}
+                />
+              )}
               {activeTab.viewMode === 'wysiwyg' ? (
                 <main className="editor-container" ref={editorScrollRef}>
                   {!editorReady && (
                     <div
                       className="content-preview"
-                      dangerouslySetInnerHTML={{ __html: markdownToHtml(activeTab.content) }}
+                      dangerouslySetInnerHTML={{ __html: markdownToHtml(activeTab.content, [], getDocDir(activeTab.filePath)) }}
                     />
                   )}
                   <div style={editorReady ? undefined : { position: 'absolute', opacity: 0, pointerEvents: 'none' }}>
@@ -770,6 +1004,7 @@ function App() {
                         defaultValue={activeTab.content}
                         onChange={handleEditorChange}
                         editorRef={editorRef}
+                        docDir={getDocDir(activeTab.filePath)}
                       />
                     )}
                   </div>
@@ -870,7 +1105,7 @@ function applyInline(s: string): string {
     .replace(/~~([^~]+)~~/g, '<del>$1</del>')
 }
 
-export function markdownToHtml(md: string, diagramBlocks: string[] = []): string {
+export function markdownToHtml(md: string, diagramBlocks: string[] = [], imgBaseDir: string | null = null): string {
   // Basic markdown to HTML conversion for export
   // Extract YAML frontmatter first — otherwise its closing `---` would turn
   // the metadata lines into a setext-style heading / stray <hr>.
@@ -919,8 +1154,10 @@ export function markdownToHtml(md: string, diagramBlocks: string[] = []): string
   const html = escapeHtml(body)
     // Inline code
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    // Images (data:image/ URIs allowed, javascript: and other data: blocked)
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) => `<img src="${safeUrl(url, true)}" alt="${alt}" />`)
+    // Images (local relative/absolute paths resolve to asset:// URLs so the
+    // WebView can load them; data:image/ URIs allowed, javascript: blocked)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) =>
+      `<img src="${safeUrl(resolveImgSrc(url, imgBaseDir), true)}" alt="${alt}" />`)
     // Links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => `<a href="${safeUrl(url)}">${text}</a>`)
     // Headings

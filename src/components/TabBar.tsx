@@ -21,6 +21,10 @@ export interface Tab {
   viewState?: TabViewState
   /** 文件打开时检测到的编码（UTF-8 / UTF-8 (BOM) / UTF-16 / GBK） */
   encoding?: string
+  /** 最近一次已知的文件 mtime（毫秒），用于检测磁盘外部变更 */
+  lastMtimeMs?: number | null
+  /** 磁盘上的文件已被其他程序修改，待用户确认重新加载 */
+  externalChanged?: boolean
 }
 
 interface TabBarProps {

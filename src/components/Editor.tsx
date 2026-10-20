@@ -1,7 +1,7 @@
 import { useRef, useImperativeHandle, useState } from 'react'
 import { Crepe } from '@milkdown/crepe'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
-import { callCommand, $node, $remark } from '@milkdown/utils'
+import { $node, $prose, $remark, $view, callCommand } from '@milkdown/utils'
 import frontmatter from 'remark-frontmatter'
 import {
   toggleStrongCommand,
@@ -21,6 +21,7 @@ import {
   orderedListSchema,
   codeBlockSchema,
   blockquoteSchema,
+  imageSchema,
 } from '@milkdown/kit/preset/commonmark'
 import {
   toggleStrikethroughCommand,
@@ -37,11 +38,15 @@ import {
   deleteTable,
   TableMap,
 } from '@milkdown/kit/prose/tables'
-import { Selection, TextSelection } from '@milkdown/kit/prose/state'
-import type { EditorView } from '@milkdown/kit/prose/view'
+import { Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state'
+import type { EditorView, NodeView } from '@milkdown/kit/prose/view'
+import type { Node as PMNode } from '@milkdown/kit/prose/model'
 import { commandsCtx, editorViewCtx, type Editor as MilkdownEditor } from '@milkdown/kit/core'
 import { diagramPlugin, diagramPluginKey } from '../lib/diagramPlugin'
 import { clearDiagramCache, setMermaidTheme } from '../lib/diagram'
+import { findPlugin, findPluginKey } from '../lib/findPlugin'
+import { resolveImgSrc } from '../lib/imgSrc'
+import { storePastedImage } from '../lib/imageInsert'
 
 import '@milkdown/crepe/theme/common/reset.css'
 import '@milkdown/crepe/theme/common/prosemirror.css'
@@ -121,6 +126,11 @@ export type TableOp =
   | 'deleteCol'
   | 'deleteTable'
 
+export interface FindInfo {
+  total: number
+  active: number
+}
+
 export interface EditorHandle {
   ready: boolean
   getMarkdown: () => string
@@ -148,6 +158,14 @@ export interface EditorHandle {
   runTableOp: (op: TableOp, index: number, tablePos: number) => void
   /** 主题切换后让图表按新配色重绘 */
   setTheme: (theme: 'light' | 'dark') => void
+  /** 查找替换（WYSIWYG）：设置查询词并重算匹配 */
+  findSetQuery: (query: string, caseSensitive: boolean) => void
+  /** 查找替换（WYSIWYG）：当前匹配总数与激活下标（无匹配时 active 为 -1） */
+  getFindState: () => FindInfo
+  findNext: () => void
+  findPrev: () => void
+  replaceCurrent: (replacement: string) => void
+  replaceAll: (replacement: string) => number
 }
 
 const defaultActive: ActiveState = {
@@ -211,9 +229,63 @@ interface EditorInnerProps {
   defaultValue: string
   onChange: (markdown: string) => void
   editorRef: React.RefObject<EditorHandle | null>
+  /** 文档所在目录：相对路径图片据此解析为 asset URL、粘贴图片落盘位置 */
+  docDir: string | null
 }
 
-function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
+/** 图片 nodeView：把 attrs.src 的相对/本地路径解析成 asset:// URL 后再赋给 <img>。
+ *  序列化用的是 attrs.src 原值，不受此渲染影响。 */
+function makeImageNodeView(docDir: string | null) {
+  return (node: PMNode): NodeView => {
+    const img = document.createElement('img')
+    const apply = (n: PMNode) => {
+      img.src = resolveImgSrc(String(n.attrs.src ?? ''), docDir)
+      if (n.attrs.alt) img.alt = String(n.attrs.alt)
+      else img.removeAttribute('alt')
+      if (n.attrs.title) img.title = String(n.attrs.title)
+      else img.removeAttribute('title')
+    }
+    apply(node)
+    return {
+      dom: img,
+      update: (n) => {
+        if (n.type.name !== 'image') return false
+        apply(n)
+        return true
+      },
+      // src 是外部转换的 asset URL，与 attrs.src 不同，必须忽略 PM 的 mutation 观察
+      ignoreMutation: () => true,
+    }
+  }
+}
+
+/** 粘贴图片：剪贴板二进制图片 → assets/ 落盘（或 data URI 兜底）→ 插入 image 节点 */
+function makeImagePastePlugin(docDir: string | null) {
+  return $prose(() => {
+    return new Plugin({
+      props: {
+        handlePaste: (view, event) => {
+          const files = Array.from(event.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
+          if (files.length === 0) return false
+          event.preventDefault()
+          void (async () => {
+            for (const file of files) {
+              const src = await storePastedImage(file, docDir)
+              if (!src) continue
+              const type = view.state.schema.nodes.image
+              if (!type) continue
+              view.dispatch(view.state.tr.replaceSelectionWith(type.create({ src })))
+              view.focus()
+            }
+          })()
+          return true
+        },
+      },
+    })
+  })
+}
+
+function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerProps) {
   const crepeRef = useRef<Crepe | null>(null)
 
   const { get } = useEditor((root) => {
@@ -240,6 +312,9 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
       .use(remarkFrontmatterPlugin)
       .use(frontmatterNode)
       .use(diagramPlugin)
+      .use(findPlugin)
+      .use($view(imageSchema.node, () => makeImageNodeView(docDir)))
+      .use(makeImagePastePlugin(docDir))
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {
@@ -347,6 +422,88 @@ function EditorInner({ defaultValue, onChange, editorRef }: EditorInnerProps) {
       })
     },
 
+    findSetQuery: (query, caseSensitive) => {
+      get()?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        view.dispatch(view.state.tr.setMeta(findPluginKey, { type: 'query', query, caseSensitive }))
+      })
+    },
+
+    getFindState: () => {
+      const view = get()?.ctx.get(editorViewCtx)
+      const st = view ? findPluginKey.getState(view.state) : null
+      return st ? { total: st.matches.length, active: st.matches.length > 0 ? st.active : -1 } : { total: 0, active: -1 }
+    },
+
+    findNext: () => {
+      get()?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        const st = findPluginKey.getState(view.state)
+        if (!st || st.matches.length === 0) return
+        const active = (st.active + 1) % st.matches.length
+        const m = st.matches[active]
+        view.dispatch(
+          view.state.tr
+            .setMeta(findPluginKey, { type: 'active', active })
+            .setSelection(TextSelection.create(view.state.doc, m.from, m.to))
+            .scrollIntoView(),
+        )
+        view.focus()
+      })
+    },
+
+    findPrev: () => {
+      get()?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        const st = findPluginKey.getState(view.state)
+        if (!st || st.matches.length === 0) return
+        const active = (st.active - 1 + st.matches.length) % st.matches.length
+        const m = st.matches[active]
+        view.dispatch(
+          view.state.tr
+            .setMeta(findPluginKey, { type: 'active', active })
+            .setSelection(TextSelection.create(view.state.doc, m.from, m.to))
+            .scrollIntoView(),
+        )
+        view.focus()
+      })
+    },
+
+    replaceCurrent: (replacement) => {
+      get()?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        const st = findPluginKey.getState(view.state)
+        if (!st || st.matches.length === 0) return
+        const m = st.matches[st.active] ?? st.matches[0]
+        // insertText 不接受换行，压成空格（与多数编辑器一致）
+        view.dispatch(
+          view.state.tr
+            .insertText(replacement.replace(/\r?\n/g, ' '), m.from, m.to)
+            .scrollIntoView(),
+        )
+        view.focus()
+      })
+    },
+
+    replaceAll: (replacement) => {
+      let count = 0
+      get()?.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        const safe = replacement.replace(/\r?\n/g, ' ')
+        // 每替换一个，插件就重算一次 matches；总是替换 matches[0]，
+        // 直到不再有匹配（防御上限防死循环）
+        while (count < 10000) {
+          const st = findPluginKey.getState(view.state)
+          if (!st || st.matches.length === 0) break
+          const m = st.matches[0]
+          view.dispatch(view.state.tr.insertText(safe, m.from, m.to))
+          count++
+        }
+        view.focus()
+      })
+      return count
+    },
+
     getActiveState: () => {
       const editor = get()
       if (!editor) return defaultActive
@@ -385,15 +542,18 @@ interface EditorProps {
   defaultValue: string
   onChange: (markdown: string) => void
   editorRef: React.RefObject<EditorHandle | null>
+  /** 文档所在目录：相对图片解析 / 粘贴图片落盘用 */
+  docDir: string | null
 }
 
-export default function Editor({ defaultValue, onChange, editorRef }: EditorProps) {
+export default function Editor({ defaultValue, onChange, editorRef, docDir }: EditorProps) {
   return (
     <MilkdownProvider>
       <EditorInner
         defaultValue={defaultValue}
         onChange={onChange}
         editorRef={editorRef}
+        docDir={docDir}
       />
     </MilkdownProvider>
   )

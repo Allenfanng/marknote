@@ -1613,3 +1613,170 @@ body {
 .table-dialog-btn.primary:hover {
   opacity: 0.9;
 }
+
+/* ---------------- 查找替换面板 ---------------- */
+.find-replace {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-secondary, #fff);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  min-width: 300px;
+}
+
+.find-replace .fr-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.find-replace .fr-indent {
+  width: 22px;
+  flex-shrink: 0;
+}
+
+.find-replace .fr-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.find-replace .fr-input:focus {
+  border-color: var(--accent-color);
+}
+
+.find-replace .fr-input-empty {
+  border-color: #dc3545;
+}
+
+.find-replace .fr-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 34px;
+  text-align: center;
+}
+
+.find-replace .fr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.find-replace .fr-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.find-replace .fr-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.find-replace .fr-btn.active {
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+}
+
+.find-replace .fr-btn-text {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.find-replace .fr-btn-text:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.find-replace .fr-btn-text:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 编辑器内匹配高亮（ProseMirror decoration） */
+.find-match {
+  background-color: rgba(255, 213, 79, 0.45);
+  border-radius: 2px;
+}
+
+.find-match-active {
+  background-color: rgba(255, 152, 0, 0.6);
+  outline: 1px solid rgba(255, 152, 0, 0.9);
+}
+
+[data-theme='dark'] .find-match {
+  background-color: rgba(255, 213, 79, 0.3);
+}
+
+[data-theme='dark'] .find-match-active {
+  background-color: rgba(255, 152, 0, 0.45);
+}
+
+/* ---------------- 外部文件变更提示条 ---------------- */
+.external-change-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--bg-secondary));
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.external-change-banner span {
+  flex: 1;
+}
+
+.external-change-btn {
+  padding: 3px 12px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent-color);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.external-change-btn:hover {
+  opacity: 0.9;
+}
+
+.external-change-btn.ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.external-change-btn.ghost:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
