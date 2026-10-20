@@ -7,12 +7,7 @@
   ],
   "permissions": [
     "core:default",
-    "core:webview:allow-create-webview-window",
-    "core:window:allow-create",
     "core:event:default",
-    "core:event:allow-emit",
-    "core:event:allow-listen",
-    "core:event:allow-unlisten",
     "core:path:default"
   ]
 }

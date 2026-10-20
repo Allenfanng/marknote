@@ -12,8 +12,9 @@ import SourceView from './components/SourceView'
 import Sidebar from './components/Sidebar'
 import StatusBar from './components/StatusBar'
 import FindReplace from './components/FindReplace'
-import { prepareDiagrams, sanitizeSvg } from './lib/diagram'
-import { getDocDir, resolveImgSrc } from './lib/imgSrc'
+import { prepareDiagrams } from './lib/diagram'
+import { renderMarkdown } from './lib/markdown'
+import { getDocDir } from './lib/imgSrc'
 import { copyDroppedImage, isImagePath } from './lib/imageInsert'
 import { DIAGRAM_ZOOM_EVENT, type DiagramZoomDetail } from './lib/diagramActions'
 import './App.css'
@@ -107,6 +108,9 @@ function App() {
   const [activeTabId, setActiveTabId] = useState(tabs[0]?.id ?? '')
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const editorRef = useRef<EditorHandle | null>(null)
+  // editorHandle 提升为 state：渲染期读 ref.current 传 props 会让子组件
+  // 拿到的引用过期（依赖别的 state 变化「碰巧」重渲染才刷新）
+  const [editorHandle, setEditorHandle] = useState<EditorHandle | null>(null)
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const [editorReady, setEditorReady] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -161,6 +165,8 @@ function App() {
   }, [])
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? tabs[0]
+  // 只取视图模式字符串做 effect 依赖：避免每次 tabs 更新都重挂轮询
+  const activeViewMode = activeTab?.viewMode
 
 
   const updateTab = useCallback((tabId: string, updates: Partial<Tab>) => {
@@ -179,6 +185,7 @@ function App() {
     setEditorReady(false)
     justLoadedRef.current = true
     editorBaselineRef.current = null
+    setEditorHandle(null)
     setEditorKey((k) => k + 1)
   }, [])
 
@@ -295,6 +302,7 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const fileParam = params.get('file')
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 启动时一次性打开 URL 参数指定的文件
     if (fileParam) loadFile(fileParam)
   }, [loadFile])
 
@@ -524,7 +532,7 @@ function App() {
         ? editorRef.current.getMarkdown()
         : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
       const { text, blocks } = await prepareDiagrams(md)
-      const html = markdownToHtml(text, blocks)
+      const html = renderMarkdown(text, blocks)
       const css = getExportCss()
       await invoke('export_html', { markdown: html, css })
     } catch (e) {
@@ -541,7 +549,7 @@ function App() {
         ? editorRef.current.getMarkdown()
         : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
       const { text, blocks } = await prepareDiagrams(md)
-      const html = markdownToHtml(text, blocks)
+      const html = renderMarkdown(text, blocks)
       const css = getExportCss()
       await invoke('export_pdf', { markdown: html, css })
     } catch (e) {
@@ -741,10 +749,12 @@ function App() {
 
   // Poll for editor readiness
   useEffect(() => {
-    if (editorReady || !activeTab || activeTab.viewMode !== 'wysiwyg') return
+    if (editorReady || activeViewMode !== 'wysiwyg') return
     const id = setInterval(() => {
       if (editorRef.current?.ready) {
         setEditorReady(true)
+        // handle 提升为 state 供 Toolbar/TableControls 订阅
+        setEditorHandle(editorRef.current)
         // 记录归一化 baseline，宽限期内据此过滤 Milkdown 的虚假回调
         editorBaselineRef.current = editorRef.current.getMarkdown()
         // Release justLoadedRef now; the baseline comparison in
@@ -755,7 +765,7 @@ function App() {
       }
     }, 100)
     return () => clearInterval(id)
-  }, [editorReady, activeTab?.viewMode])
+  }, [editorReady, activeViewMode])
 
   // 切换标签页 / 视图模式后立即按记忆值定位：源码模式直接恢复 textarea 的
   // 光标与滚动；WYSIWYG 此时容器里还是即时预览，先大致定位，编辑器就绪后
@@ -879,6 +889,21 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleSave, handleOpen, handleNewTab, toggleViewMode, handleTabClose, switchToTab])
 
+  // 拖入的图片：复制到 assets/ 后经编辑器插入（编辑器未就绪则忽略插入）
+  const handleDroppedImages = useCallback(async (imgPaths: string[]) => {
+    const docDir = getDocDir(activeTabIdRef.current
+      ? tabsRef.current.find((t) => t.id === activeTabIdRef.current)?.filePath ?? null
+      : null)
+    if (!docDir) {
+      alert('请先保存文档（Ctrl+S），再拖入图片 —— 图片将写入文档目录下的 assets/ 文件夹。')
+      return
+    }
+    for (const p of imgPaths) {
+      const rel = await copyDroppedImage(p, docDir)
+      if (rel) editorRef.current?.insertImage(rel)
+    }
+  }, [])
+
   // Tauri v2 drag-drop — .md opens in a tab; images land in the editor
   useEffect(() => {
     const webview = getCurrentWebview()
@@ -907,22 +932,7 @@ function App() {
     return () => {
       unlistenPromise.then((fn) => fn())
     }
-  }, [loadFile, switchToTab])
-
-  // 拖入的图片：复制到 assets/ 后经编辑器插入（编辑器未就绪则忽略插入）
-  const handleDroppedImages = useCallback(async (imgPaths: string[]) => {
-    const docDir = getDocDir(activeTabIdRef.current
-      ? tabsRef.current.find((t) => t.id === activeTabIdRef.current)?.filePath ?? null
-      : null)
-    if (!docDir) {
-      alert('请先保存文档（Ctrl+S），再拖入图片 —— 图片将写入文档目录下的 assets/ 文件夹。')
-      return
-    }
-    for (const p of imgPaths) {
-      const rel = await copyDroppedImage(p, docDir)
-      if (rel) editorRef.current?.insertImage(rel)
-    }
-  }, [])
+  }, [loadFile, switchToTab, handleDroppedImages])
 
   const handleSidebarFileOpen = useCallback((path: string) => {
     const existingTab = tabsRef.current.find((t) => t.filePath === path)
@@ -1036,7 +1046,7 @@ function App() {
         onCloseToRight={handleCloseToRight}
       />
       <Toolbar
-        editor={editorRef.current}
+        editor={editorHandle}
         disabled={!activeTab || activeTab.viewMode === 'source' || !editorReady}
         onNew={handleNewTab}
         onOpen={handleOpen}
@@ -1079,7 +1089,7 @@ function App() {
               {findOpen && (
                 <FindReplace
                   mode={activeTab.viewMode}
-                  editor={editorRef.current}
+                  editor={editorHandle}
                   editorReady={editorReady}
                   textareaRef={sourceTextareaRef}
                   content={activeTab.viewMode === 'source' ? activeTab.sourceContent : activeTab.content}
@@ -1094,7 +1104,7 @@ function App() {
                   {!editorReady && (
                     <div
                       className="content-preview"
-                      dangerouslySetInnerHTML={{ __html: markdownToHtml(activeTab.content, [], getDocDir(activeTab.filePath)) }}
+                      dangerouslySetInnerHTML={{ __html: renderMarkdown(activeTab.content, [], getDocDir(activeTab.filePath)) }}
                     />
                   )}
                   <div style={editorReady ? undefined : { position: 'absolute', opacity: 0, pointerEvents: 'none' }}>
@@ -1110,7 +1120,7 @@ function App() {
                   </div>
                   <TableControls
                     containerRef={editorScrollRef}
-                    editor={editorRef.current}
+                    editor={editorHandle}
                     enabled={editorReady}
                   />
                 </main>
@@ -1172,123 +1182,6 @@ function App() {
       )}
     </div>
   )
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
-
-/**
- * Filter an already-HTML-escaped URL for use in href/src attributes.
- * Blocks javascript:/vbscript: style injection; data: is only allowed for
- * inline images (data:image/...).
- */
-function safeUrl(escapedUrl: string, allowDataImage = false): string {
-  const u = escapedUrl.trim().replace(/&amp;/g, '&').toLowerCase()
-  if (/^(javascript|vbscript):/.test(u)) return '#'
-  if (u.startsWith('data:') && !(allowDataImage && /^data:image\//.test(u))) return '#'
-  return escapedUrl
-}
-
-// Inline formatting applied to table cell text (already HTML-escaped).
-function applyInline(s: string): string {
-  return s
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => `<a href="${safeUrl(url)}">${text}</a>`)
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
-}
-
-export function markdownToHtml(md: string, diagramBlocks: string[] = [], imgBaseDir: string | null = null): string {
-  // Basic markdown to HTML conversion for export
-  // Extract YAML frontmatter first — otherwise its closing `---` would turn
-  // the metadata lines into a setext-style heading / stray <hr>.
-  let frontmatterHtml = ''
-  const fmMatch = md.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/)
-  let body = md
-  if (fmMatch) {
-    frontmatterHtml = `<pre class="frontmatter">${escapeHtml(fmMatch[1])}</pre>`
-    body = md.slice(fmMatch[0].length)
-  }
-
-  // Extract fenced code blocks into placeholders BEFORE any other rule runs —
-  // otherwise line-based rules mangle their contents (a `# comment` would
-  // become a heading, each interior line would get wrapped in <p>, etc).
-  // `(?:```|$)` also handles a trailing unclosed fence (runs to EOF, like GFM).
-  const codeBlocks: string[] = []
-  body = body.replace(/```(\w*)[ \t]*\r?\n([\s\S]*?)(?:```|$)/g, (_m, lang: string, code: string) => {
-    // ```svg 直接内联渲染（同步、无需额外依赖）；"```mermaid 走异步的
-    // prepareDiagrams，导出的 HTML/PDF 里会被替换成真正的图
-    if (lang.toLowerCase() === 'svg') {
-      const svg = sanitizeSvg(code.replace(/\r?\n$/, ''))
-      if (svg) {
-        codeBlocks.push(`<div class="diagram-svg">${svg}</div>`)
-        return `\x00CB${codeBlocks.length - 1}\x00`
-      }
-    }
-    codeBlocks.push(`<pre><code class="language-${lang}">${escapeHtml(code.replace(/\r?\n$/, ''))}</code></pre>`)
-    return `\x00CB${codeBlocks.length - 1}\x00`
-  })
-
-  // Extract GFM tables (header row + `---` delimiter row + body rows).
-  const tables: string[] = []
-  body = body.replace(/^\|[^\n]*\|[ \t]*\r?\n\|[ :|-]*\|[ \t]*(?:\r?\n\|[^\n]*\|[ \t]*)*/gm, (block) => {
-    const rows = block.replace(/\r/g, '').split('\n')
-    const splitRow = (line: string) =>
-      line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
-    const head = splitRow(rows[0]).map((c) => `<th>${applyInline(escapeHtml(c))}</th>`).join('')
-    const bodyRows = rows
-      .slice(2)
-      .map((r) => `<tr>${splitRow(r).map((c) => `<td>${applyInline(escapeHtml(c))}</td>`).join('')}</tr>`)
-      .join('')
-    tables.push(`<table><thead><tr>${head}</tr></thead><tbody>${bodyRows}</tbody></table>`)
-    return `\x00TB${tables.length - 1}\x00`
-  })
-
-  const html = escapeHtml(body)
-    // Inline code
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    // Images (local relative/absolute paths resolve to asset:// URLs so the
-    // WebView can load them; data:image/ URIs allowed, javascript: blocked)
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) =>
-      `<img src="${safeUrl(resolveImgSrc(url, imgBaseDir), true)}" alt="${alt}" />`)
-    // Links
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => `<a href="${safeUrl(url)}">${text}</a>`)
-    // Headings
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    // Horizontal rule (must run before bold/italic to prevent *** from partial match)
-    .replace(/^(\-{3,}|\*{3,}|_{3,})[ \t]*$/gm, '<hr />')
-    // Bold
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    // Italic
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    // Strikethrough
-    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
-    // Blockquote
-    .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-    // Unordered list
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    // Ordered list
-    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-    // Paragraphs (lines not already in tags; \x00 placeholder lines skipped)
-    .replace(/^(?!\x00)(?!<[hblpuoi]|<li|<hr|<pre|<code|<blockquote|<strong|<em|<del)(.+)$/gm, '<p>$1</p>')
-    // Merge consecutive list items
-    .replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
-    // Restore code blocks and tables
-    .replace(/\x00CB(\d+)\x00/g, (_m, i: string) => codeBlocks[Number(i)])
-    .replace(/\x00TB(\d+)\x00/g, (_m, i: string) => tables[Number(i)])
-    // Restore pre-rendered diagrams (mermaid / svg)
-    .replace(/\x00DG(\d+)\x00/g, (_m, i: string) => diagramBlocks[Number(i)] ?? '')
-
-  return frontmatterHtml + html
 }
 
 function getExportCss(): string {

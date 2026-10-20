@@ -78,9 +78,10 @@ export default function TableControls({ containerRef, editor, enabled }: TableCo
   const pointerRef = useRef({ x: 0, y: 0 })
   const hoverRef = useRef<HoverState | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  // editor 每次渲染都是新对象引用，用 ref 兜住，避免 mousemove 监听反复重挂
+  // editor 每次渲染可能是新对象引用，用 ref 兜住，避免 mousemove 监听反复重挂。
+  // 在 effect 里更新（渲染期写 ref 属 React 反模式）
   const editorRef = useRef(editor)
-  editorRef.current = editor
+  useEffect(() => { editorRef.current = editor }, [editor])
 
   const clearHover = useCallback(() => {
     hoverRef.current = null
@@ -157,8 +158,6 @@ export default function TableControls({ containerRef, editor, enabled }: TableCo
 
     // 命中行
     let rowIndex: number
-    let rowTop: number
-    let rowHeight: number
     if (keepFromPrev) {
       rowIndex = hoverRef.current!.rowIndex
     } else {
@@ -172,13 +171,11 @@ export default function TableControls({ containerRef, editor, enabled }: TableCo
       }
     }
     const rowRect = rows[Math.min(rowIndex, rows.length - 1)]?.getBoundingClientRect()
-    rowTop = (rowRect?.top ?? rect.top) - originY
-    rowHeight = rowRect?.height ?? rect.height
+    const rowTop = (rowRect?.top ?? rect.top) - originY
+    const rowHeight = rowRect?.height ?? rect.height
 
     // 命中列
     let colIndex: number
-    let colLeft: number
-    let colWidth: number
     if (keepFromPrev) {
       colIndex = hoverRef.current!.colIndex
     } else {
@@ -192,8 +189,8 @@ export default function TableControls({ containerRef, editor, enabled }: TableCo
     }
     const colStart = edges[Math.min(colIndex, edges.length - 1)] ?? rect.left
     const colEnd = edges[colIndex + 1] ?? rect.right
-    colLeft = colStart - originX
-    colWidth = Math.max(colEnd - colStart, 12)
+    const colLeft = colStart - originX
+    const colWidth = Math.max(colEnd - colStart, 12)
 
     const next: HoverState = {
       tablePos,

@@ -9,7 +9,7 @@ function countStats(text: string): { chars: number; words: number } {
   // Remove markdown syntax for cleaner counting
   const clean = text
     .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, ''))
-    .replace(/[#*_~`>\[\]\(\)!\-|]/g, '')
+    .replace(/[#*_~`>[\]()!|-]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 
@@ -36,8 +36,16 @@ function readSelection(target: EventTarget | null): string {
   return window.getSelection()?.toString() ?? ''
 }
 
+declare global {
+  interface Window {
+    /** index.html 启动打点（performance.now 快照） */
+    __appStart?: number
+  }
+}
+
 export default function StatusBar({ content, fontSize }: StatusBarProps) {
   const [selectionText, setSelectionText] = useState('')
+  const [startupMs, setStartupMs] = useState(0)
 
   useEffect(() => {
     const handler = (e: Event) => setSelectionText(readSelection(e.target))
@@ -52,6 +60,7 @@ export default function StatusBar({ content, fontSize }: StatusBarProps) {
   }, [])
 
   // Switching tabs rebuilds the editor — drop the stale selection.
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 标签切换时一次性重置，非级联
   useEffect(() => { setSelectionText('') }, [content])
 
   const stats = useMemo(() => countStats(content), [content])
@@ -59,9 +68,12 @@ export default function StatusBar({ content, fontSize }: StatusBarProps) {
     () => (selectionText ? countStats(selectionText).words : null),
     [selectionText]
   )
-  const startupMs = useMemo(() => {
-    const start = (window as any).__appStart as number | undefined
-    return start ? Math.round(performance.now() - start) : 0
+
+  // 启动耗时在 mount 后读一次（render 期调用 performance.now() 属不纯函数）
+  useEffect(() => {
+    const start = window.__appStart
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount 时一次性计算
+    if (start) setStartupMs(Math.round(performance.now() - start))
   }, [])
 
   return (

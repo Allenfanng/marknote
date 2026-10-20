@@ -49,6 +49,9 @@ export default function Sidebar({ filePath, theme, onFileOpen, outlineHeadings, 
     }
   }, [])
 
+  // tab 切换时触发对应数据加载（异步函数内部的 setState 发生在 await 之后，
+  // 不是同步级联；规则按静态调用链报错，显式豁免）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (tab === 'directory') loadDirFiles()
     else if (tab === 'recent') loadRecentFiles()
@@ -58,6 +61,7 @@ export default function Sidebar({ filePath, theme, onFileOpen, outlineHeadings, 
   useEffect(() => {
     if (tab === 'directory') loadDirFiles()
   }, [filePath, tab, loadDirFiles])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const files = tab === 'directory' ? dirFiles : recentFiles
 

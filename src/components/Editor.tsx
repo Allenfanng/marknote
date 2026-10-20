@@ -336,6 +336,7 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
 
   // 开发模式调试钩子：自动化测试 / 控制台可直接读文档真相
   if (import.meta.env.DEV) {
+    // eslint-disable-next-line react-hooks/immutability -- dev-only 调试钩子，渲染期挂 window 是有意为之
     ;(window as unknown as Record<string, unknown>).__marknoteEditor = {
       getMarkdown: () => crepeRef.current?.getMarkdown() ?? '',
       getView: () => get()?.ctx.get(editorViewCtx) ?? null,

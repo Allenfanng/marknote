@@ -90,7 +90,9 @@ export default function FindReplace({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // 查询变更：WYSIWYG 下发插件；源码模式本地算
+  // 查询变更：WYSIWYG 下发插件；源码模式本地算。
+  // setState 均在 setTimeout 回调里（异步），非同步级联；规则静态报错，显式豁免
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (mode === 'wysiwyg') {
       if (!editor || !editorReady) return
@@ -116,6 +118,7 @@ export default function FindReplace({
     if (mode !== 'wysiwyg' || !editor || !editorReady) return
     setWysiwygInfo(editor.getFindState())
   }, [mode, editor, editorReady, content])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const total = mode === 'wysiwyg' ? wysiwygInfo.total : sourceMatches.length
   const active = mode === 'wysiwyg' ? wysiwygInfo.active : sourceMatches.length > 0 ? sourceActive : -1

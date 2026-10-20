@@ -17,6 +17,7 @@
     "@milkdown/react": "^7.21.1",
     "@tauri-apps/api": "^2.11.0",
     "lucide-react": "^1.17.0",
+    "markdown-it": "^14.3.3",
     "mermaid": "^11.17.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.11.2",
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

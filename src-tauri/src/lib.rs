@@ -1,4 +1,3 @@
-use std::fs;
 use rfd::AsyncFileDialog;
 use tauri::{Emitter, Listener, Manager};
 
@@ -15,7 +14,9 @@ pub struct ReadFileResult {
 /// "stream did not contain valid UTF-8"; now they decode lossily via GBK.
 #[tauri::command]
 async fn read_file(path: String) -> Result<ReadFileResult, String> {
-    let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("Failed to read file: {}", e))?;
 
     // UTF-8 BOM
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
@@ -53,14 +54,14 @@ async fn write_file(path: String, content: String) -> Result<(), String> {
     let file_name = target.file_name().and_then(|n| n.to_str()).unwrap_or("file");
     let tmp = dir.join(format!(".{}.marknote-tmp", file_name));
 
-    fs::write(&tmp, &content).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("Failed to write file: {}", e)
-    })?;
-    fs::rename(&tmp, target).map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        format!("Failed to replace file: {}", e)
-    })?;
+    if let Err(e) = tokio::fs::write(&tmp, &content).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(format!("Failed to write file: {}", e));
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, target).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(format!("Failed to replace file: {}", e));
+    }
     Ok(())
 }
 
@@ -125,10 +126,15 @@ async fn save_file_as(
 
 #[tauri::command]
 async fn list_dir_files(dir_path: String) -> Result<Vec<String>, String> {
-    let entries = fs::read_dir(&dir_path).map_err(|e| format!("Failed to read directory: {}", e))?;
+    let mut entries = tokio::fs::read_dir(&dir_path)
+        .await
+        .map_err(|e| format!("Failed to read directory: {}", e))?;
     let mut files = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| format!("Failed to read entry: {}", e))?
+    {
         let path = entry.path();
         if path.is_file() {
             if let Some(ext) = path.extension() {
@@ -151,7 +157,8 @@ async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
     if !recent_path.exists() {
         return Ok(Vec::new());
     }
-    let content = fs::read_to_string(&recent_path)
+    let content = tokio::fs::read_to_string(&recent_path)
+        .await
         .map_err(|e| format!("Failed to read recent files: {}", e))?;
     let files: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
     // 过滤已不存在（被删除/移动）的路径
@@ -162,11 +169,14 @@ async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
 async fn add_recent_file(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let data_dir = app.path().app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
+    tokio::fs::create_dir_all(&data_dir)
+        .await
+        .map_err(|e| format!("Failed to create data dir: {}", e))?;
     let recent_path = data_dir.join("recent.json");
 
     let mut files: Vec<String> = if recent_path.exists() {
-        let content = fs::read_to_string(&recent_path)
+        let content = tokio::fs::read_to_string(&recent_path)
+            .await
             .map_err(|e| format!("Failed to read recent files: {}", e))?;
         serde_json::from_str(&content).unwrap_or_default()
     } else {
@@ -179,7 +189,9 @@ async fn add_recent_file(app: tauri::AppHandle, path: String) -> Result<(), Stri
 
     let json = serde_json::to_string_pretty(&files)
         .map_err(|e| format!("Failed to serialize recent files: {}", e))?;
-    fs::write(&recent_path, json).map_err(|e| format!("Failed to write recent files: {}", e))?;
+    tokio::fs::write(&recent_path, json)
+        .await
+        .map_err(|e| format!("Failed to write recent files: {}", e))?;
     Ok(())
 }
 
@@ -245,7 +257,8 @@ async fn export_html(markdown: String, css: String) -> Result<(), String> {
 </div>
 </body>
 </html>"#);
-            fs::write(handle.path(), &html)
+            tokio::fs::write(handle.path(), &html)
+                .await
                 .map_err(|e| format!("Failed to write HTML: {}", e))?;
             Ok(())
         }
@@ -290,27 +303,32 @@ async fn export_pdf(markdown: String, css: String) -> Result<(), String> {
 </body>
 </html>"#);
     let tmp_dir = std::env::temp_dir().join("marknote-export");
-    fs::create_dir_all(&tmp_dir).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    tokio::fs::create_dir_all(&tmp_dir)
+        .await
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
     // 清理 24 小时前的导出临时文件，防止无限累积
-    if let Ok(entries) = fs::read_dir(&tmp_dir) {
-        for entry in entries.flatten() {
+    if let Ok(mut entries) = tokio::fs::read_dir(&tmp_dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
             let is_old = entry
                 .metadata()
-                .and_then(|m| m.modified())
+                .await
                 .ok()
+                .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() < now_secs() - 24 * 3600)
                 .unwrap_or(false);
             if is_old {
-                let _ = fs::remove_file(entry.path());
+                let _ = tokio::fs::remove_file(entry.path()).await;
             }
         }
     }
 
     // 唯一文件名：连续导出不再互相覆盖
     let file_path = tmp_dir.join(format!("document-{}.html", now_secs()));
-    fs::write(&file_path, &html).map_err(|e| format!("Failed to write HTML: {}", e))?;
+    tokio::fs::write(&file_path, &html)
+        .await
+        .map_err(|e| format!("Failed to write HTML: {}", e))?;
     open::that(&file_path).map_err(|e| format!("Failed to open browser: {}", e))?;
     Ok(())
 }
@@ -347,12 +365,18 @@ async fn confirm_close(app: tauri::AppHandle) -> Result<(), String> {
 async fn save_session(app: tauri::AppHandle, session: String) -> Result<(), String> {
     let data_dir = app.path().app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-    fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
+    tokio::fs::create_dir_all(&data_dir)
+        .await
+        .map_err(|e| format!("Failed to create data dir: {}", e))?;
     let path = data_dir.join("session.json");
     // Atomic write, same strategy as write_file
     let tmp = data_dir.join(".session.json.marknote-tmp");
-    fs::write(&tmp, &session).map_err(|e| format!("Failed to write session: {}", e))?;
-    fs::rename(&tmp, &path).map_err(|e| format!("Failed to replace session: {}", e))?;
+    tokio::fs::write(&tmp, &session)
+        .await
+        .map_err(|e| format!("Failed to write session: {}", e))?;
+    tokio::fs::rename(&tmp, &path)
+        .await
+        .map_err(|e| format!("Failed to replace session: {}", e))?;
     Ok(())
 }
 
@@ -365,7 +389,8 @@ async fn get_session(app: tauri::AppHandle) -> Result<Option<String>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let content = fs::read_to_string(&path)
+    let content = tokio::fs::read_to_string(&path)
+        .await
         .map_err(|e| format!("Failed to read session: {}", e))?;
     Ok(Some(content))
 }
@@ -380,9 +405,13 @@ async fn copy_image_asset(src_path: String, dir: String) -> Result<String, Strin
         .unwrap_or_else(|| "png".into());
     let name = image_file_name(&ext);
     let assets = std::path::Path::new(&dir).join("assets");
-    fs::create_dir_all(&assets).map_err(|e| format!("Failed to create assets dir: {}", e))?;
+    tokio::fs::create_dir_all(&assets)
+        .await
+        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
     let target = assets.join(&name);
-    fs::copy(&src_path, &target).map_err(|e| format!("Failed to copy image: {}", e))?;
+    tokio::fs::copy(&src_path, &target)
+        .await
+        .map_err(|e| format!("Failed to copy image: {}", e))?;
     Ok(format!("assets/{}", name))
 }
 
@@ -423,11 +452,15 @@ fn epoch_to_datetime(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
 #[tauri::command]
 async fn save_image_asset(dir: String, data: Vec<u8>, ext: String) -> Result<String, String> {
     let assets = std::path::Path::new(&dir).join("assets");
-    fs::create_dir_all(&assets).map_err(|e| format!("Failed to create assets dir: {}", e))?;
+    tokio::fs::create_dir_all(&assets)
+        .await
+        .map_err(|e| format!("Failed to create assets dir: {}", e))?;
     let safe_ext: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
     let name = image_file_name(if safe_ext.is_empty() { "png" } else { &safe_ext });
     let target = assets.join(&name);
-    fs::write(&target, &data).map_err(|e| format!("Failed to write image: {}", e))?;
+    tokio::fs::write(&target, &data)
+        .await
+        .map_err(|e| format!("Failed to write image: {}", e))?;
     Ok(format!("assets/{}", name))
 }
 
@@ -437,7 +470,8 @@ async fn save_image_asset(dir: String, data: Vec<u8>, ext: String) -> Result<Str
 async fn get_file_mtimes(paths: Vec<String>) -> Result<Vec<Option<i64>>, String> {
     let mut out = Vec::with_capacity(paths.len());
     for p in &paths {
-        let mtime = fs::metadata(p)
+        let mtime = tokio::fs::metadata(p)
+            .await
             .ok()
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())

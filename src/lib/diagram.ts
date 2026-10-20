@@ -72,6 +72,17 @@ let mermaidPromise: Promise<typeof import('mermaid').default> | null = null
 const svgCache = new Map<string, string>()
 const inflight = new Map<string, Promise<string>>()
 
+/** 缓存上限：超出后驱逐最早写入的条目（Map 保序，等价 LRU 的最简实现） */
+const SVG_CACHE_MAX = 60
+
+function cacheSet(key: string, value: string): void {
+  svgCache.set(key, value)
+  if (svgCache.size > SVG_CACHE_MAX) {
+    const oldest = svgCache.keys().next().value
+    if (oldest !== undefined) svgCache.delete(oldest)
+  }
+}
+
 function loadMermaid(): Promise<typeof import('mermaid').default> {
   if (!mermaidPromise) {
     mermaidPromise = import('mermaid').then((mod) => {
@@ -120,7 +131,7 @@ export async function renderMermaid(code: string): Promise<string> {
     const mermaid = await loadMermaid()
     const id = `marknote-mermaid-${++renderSeq}`
     const { svg } = await mermaid.render(id, code)
-    svgCache.set(key, svg)
+    cacheSet(key, svg)
     return svg
   })()
 
@@ -136,8 +147,18 @@ export async function renderMermaid(code: string): Promise<string> {
  * 导出 / 预览：把 markdown 里的图表代码块换成占位符
  * ------------------------------------------------------------------ */
 
+/** 占位符用 Unicode 私用区字符，不与正文冲突、不触发 no-control-regex */
+const PLACEHOLDER_OPEN = '\uE000'
+const PLACEHOLDER_CLOSE = '\uE001'
+
+export function diagramPlaceholder(index: number): string {
+  return `${PLACEHOLDER_OPEN}${index}${PLACEHOLDER_CLOSE}`
+}
+
+export const diagramPlaceholderRegex = new RegExp(`${PLACEHOLDER_OPEN}(\\d+)${PLACEHOLDER_CLOSE}`, 'g')
+
 export interface PreparedDiagrams {
-  /** 图表已抽成 \x00DG{n}\x00 占位符的 markdown */
+  /** 图表已抽成占位符的 markdown */
   text: string
   /** 占位符对应的 HTML 片段 */
   blocks: string[]
@@ -183,7 +204,7 @@ export async function prepareDiagrams(md: string): Promise<PreparedDiagrams> {
         )
       }
     }
-    text += `\x00DG${blocks.length - 1}\x00`
+    text += diagramPlaceholder(blocks.length - 1)
   }
   text += md.slice(lastIndex)
   return { text, blocks }
