@@ -42,11 +42,13 @@ import { Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view'
 import type { Node as PMNode } from '@milkdown/kit/prose/model'
 import { commandsCtx, editorViewCtx, type Editor as MilkdownEditor } from '@milkdown/kit/core'
+import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { diagramPlugin, diagramPluginKey } from '../lib/diagramPlugin'
 import { clearDiagramCache, setMermaidTheme } from '../lib/diagram'
 import { findPlugin, findPluginKey } from '../lib/findPlugin'
 import { resolveImgSrc } from '../lib/imgSrc'
 import { storePastedImage } from '../lib/imageInsert'
+import { readCspNonce } from '../lib/cspNonce'
 
 import '@milkdown/crepe/theme/common/reset.css'
 import '@milkdown/crepe/theme/common/prosemirror.css'
@@ -290,6 +292,10 @@ function makeImagePastePlugin(docDir: string | null) {
 function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerProps) {
   const crepeRef = useRef<Crepe | null>(null)
 
+  // Tauri 注入的 CSP nonce 必须在建编辑器前取到：
+  // 它挂在 index.html 自带的 <style> 上，随首屏 HTML 一起到达。
+  const [cspNonce] = useState(() => readCspNonce())
+
   const { get } = useEditor((root) => {
     const crepe = new Crepe({
       root,
@@ -311,6 +317,17 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
       },
       featureConfigs: {
         cursor: { virtual: false },
+        // CodeMirror 6 靠运行时动态创建 <style> 注入自己的主题（StyleModule），
+        // 而这些 <style> 不带 nonce → 被 Tauri 的 CSP 拒绝（style-src 里出现 nonce 时
+        // 'unsafe-inline' 会被忽略）→ 代码块丢失 .cm-content/.cm-gutters 等全部样式，
+        // 行号竖着堆成一列、代码正文被挤到视口外。
+        // 把 Tauri 注入的同一个 nonce 交给 EditorView.cspNonce，CM 创建的 <style>
+        // 就会带上 nonce，从而通过 CSP。
+        'code-mirror': {
+          extensions: cspNonce
+            ? [CodeMirrorView.cspNonce.of(cspNonce)]
+            : [],
+        },
       },
     })
 
