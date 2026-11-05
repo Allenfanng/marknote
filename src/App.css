@@ -1831,3 +1831,232 @@ body {
 .tab-item.drop-target {
   border-left: 2px solid var(--accent-color);
 }
+
+/* ---------------- 代码块工具栏（语言选择 / 复制） ----------------
+   Crepe 的 code-block 组件样式在 theme/common/style.css 里，而本项目只引了
+   reset/prosemirror 与主题配色，没有引那份公共样式 → .tools/.copy-button
+   完全没有规则，按钮退化成堆叠在代码块上方的裸文本，看似不可点击。
+   这里只补工具栏所需的样式，刻意不整份引入 common/style.css：那份里的
+   .milkdown-code-block/.cm-editor 背景会被改成浅色 surface，破坏 oneDark
+   深色代码块与语法高亮。配色按代码块自身的深色底设计，不随应用主题变。 */
+.editor-wrapper .milkdown .milkdown-code-block {
+  position: relative;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block > .tools {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  /* 常驻可见：官方样式默认 opacity:0、hover 才出现，用户会以为点不了 */
+  opacity: 1;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block > .tools .tools-button-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .language-button,
+.editor-wrapper .milkdown .milkdown-code-block .tools .tools-button-group > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  box-sizing: border-box;
+  height: 26px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.88);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 1;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .language-button:hover,
+.editor-wrapper .milkdown .milkdown-code-block .tools .tools-button-group > button:hover {
+  background: rgba(255, 255, 255, 0.20);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .language-button:active,
+.editor-wrapper .milkdown .milkdown-code-block .tools .tools-button-group > button:active {
+  transform: translateY(1px);
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .language-button:focus-visible,
+.editor-wrapper .milkdown .milkdown-code-block .tools .tools-button-group > button:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools button svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: currentColor;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .language-button[data-expanded='true'] {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .language-button .expand-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .language-button[data-expanded='true'] .expand-icon {
+  transform: rotate(180deg);
+}
+
+/* 复制成功反馈：capture 阶段事件委托给按钮加 .copied，1.4s 后移除 */
+.editor-wrapper .milkdown .milkdown-code-block .tools .copy-button.copied {
+  background: rgba(46, 160, 67, 0.92);
+  border-color: rgba(46, 160, 67, 0.92);
+  color: #fff;
+  font-size: 0;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .copy-button.copied svg {
+  display: none;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .tools .copy-button.copied::after {
+  content: '已复制';
+  font-size: 12px;
+}
+
+/* 语言选择下拉 */
+.editor-wrapper .milkdown .milkdown-code-block .tools .language-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  /* 显式给宽度：.tools 是绝对定位的窄容器，shrink-to-fit 会把下拉压成 150px */
+  width: 220px;
+  z-index: 999;
+  padding: 0;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .list-wrapper {
+  width: 100%;
+  padding: 8px 0;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  box-shadow: var(--crepe-shadow-2, 0 8px 24px rgba(0, 0, 0, 0.28));
+  color: var(--text-primary);
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 10px 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .search-box:focus-within {
+  border-color: var(--accent-color);
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .search-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .search-icon,
+.editor-wrapper .milkdown .milkdown-code-block .clear-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .clear-icon {
+  cursor: pointer;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .language-list {
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .language-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 14px;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .language-list-item:hover,
+.editor-wrapper .milkdown .milkdown-code-block .language-list-item:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .language-list-item.no-result {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .hidden {
+  display: none !important;
+}
+
+/* 预览切换后的预览面板（图表 / 公式） */
+.editor-wrapper .milkdown .milkdown-code-block .preview-panel .preview-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--border-color);
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .preview-panel .preview-label {
+  margin: 6px 0;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.editor-wrapper .milkdown .milkdown-code-block .preview-panel .preview {
+  overflow-x: auto;
+  text-align: center;
+}

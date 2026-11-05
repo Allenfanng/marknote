@@ -1,4 +1,4 @@
-import { useRef, useImperativeHandle, useState } from 'react'
+import { useRef, useImperativeHandle, useState, useEffect } from 'react'
 import { Crepe } from '@milkdown/crepe'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import { $node, $prose, $remark, $view, callCommand } from '@milkdown/utils'
@@ -289,12 +289,66 @@ function makeImagePastePlugin(docDir: string | null) {
   })
 }
 
+function flashCopied(btn: HTMLElement) {
+  btn.classList.remove('copied')
+  // 强制重排，保证连续点击时每次都能重新触发反馈
+  void btn.offsetWidth
+  btn.classList.add('copied')
+  window.setTimeout(() => btn.classList.remove('copied'), 1400)
+}
+
+/** 写剪贴板：WebView2 失焦时 navigator.clipboard.writeText 会 reject，
+ *  Crepe 自带的 copyToClipboard 用 `return promise` 包在 try 里，异步 reject
+ *  不会进入 catch，导致复制静默失败。这里显式 await 以便真正走 execCommand 兜底。 */
+async function writeClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+    } finally {
+      ta.remove()
+    }
+  }
+}
+
 function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerProps) {
   const crepeRef = useRef<Crepe | null>(null)
 
   // Tauri 注入的 CSP nonce 必须在建编辑器前取到：
   // 它挂在 index.html 自带的 <style> 上，随首屏 HTML 一起到达。
   const [cspNonce] = useState(() => readCspNonce())
+
+  // 代码块工具栏是 Vue 组件动态渲染的，用事件委托在 capture 阶段接管复制点击：
+  // 自己读 CodeMirror 文档内容写入剪贴板（含失焦兜底），并立即给按钮反馈，
+  // 避免依赖 Crepe 的 onCopy 成功回调（失焦时不会触发）。
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      const btn = target?.closest?.('.milkdown-code-block .copy-button') as HTMLElement | null
+      if (!btn) return
+
+      const block = btn.closest('.milkdown-code-block')
+      const cmDom = block?.querySelector('.cm-editor') as HTMLElement | null
+      // findFromDOM 拿到的是 CodeMirror 的完整文档，不受虚拟滚动只渲染可见行影响
+      const view = cmDom ? CodeMirrorView.findFromDOM(cmDom) : null
+      const text = view?.state.doc.toString()
+        ?? block?.querySelector('.milkdown-code-block-placeholder code')?.textContent
+        ?? ''
+
+      flashCopied(btn)
+      void writeClipboard(text)
+    }
+    document.addEventListener('click', onClick, true)
+    return () => document.removeEventListener('click', onClick, true)
+  }, [])
 
   const { get } = useEditor((root) => {
     const crepe = new Crepe({
@@ -327,6 +381,10 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
           extensions: cspNonce
             ? [CodeMirrorView.cspNonce.of(cspNonce)]
             : [],
+          // 工具栏文案中文化（复制交互由上面的事件委托接管）
+          copyText: '复制',
+          searchPlaceholder: '搜索语言',
+          noResultText: '没有匹配的语言',
         },
       },
     })
