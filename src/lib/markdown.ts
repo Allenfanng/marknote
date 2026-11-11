@@ -8,6 +8,7 @@
  *    prepareDiagrams 渲染成私用区占位符，渲染后回填
  */
 import MarkdownIt from 'markdown-it'
+import katexPlugin from '@traptitech/markdown-it-katex'
 import { escapeHtml, sanitizeSvg, diagramPlaceholderRegex } from './diagram'
 import { resolveImgSrc } from './imgSrc'
 
@@ -16,6 +17,11 @@ const md: MarkdownIt = new MarkdownIt({
   linkify: true,
   breaks: false,
 })
+
+// 数学公式：$...$ / $$...$$ → KaTeX MathML。
+// output:'mathml' 让现代浏览器/WebView2 原生渲染，导出 HTML/PDF 无需内嵌
+// KaTeX 字体与样式即自包含（复杂度远低于内联 katex.min.css + base64 字体）。
+md.use(katexPlugin, { output: 'mathml', throwOnError: false, strict: false })
 
 // data:image/ 放行（粘贴图片的兜底路径产生 data URI），其余 data: 仍拦截
 const baseValidateLink = md.validateLink

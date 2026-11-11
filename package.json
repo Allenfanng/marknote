@@ -17,6 +17,7 @@
     "@milkdown/crepe": "^7.21.1",
     "@milkdown/react": "^7.21.1",
     "@tauri-apps/api": "^2.11.0",
+    "@traptitech/markdown-it-katex": "^3.6.0",
     "lucide-react": "^1.17.0",
     "markdown-it": "^14.3.3",
     "mermaid": "^11.17.2",
