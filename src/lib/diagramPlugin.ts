@@ -12,7 +12,7 @@ import { serializeSvg, exportSvgFile, openDiagramViewer } from './diagramActions
  * 这样既不需要改 schema，也不会破坏 markdown 的序列化往返。
  */
 
-export const diagramPluginKey = new PluginKey<DecorationSet>('marknote-diagram')
+export const diagramPluginKey = new PluginKey<DiagramState>('marknote-diagram')
 
 const DIAGRAM_POS_ATTR = 'data-diagram-pos'
 const DIAGRAM_ACTION_ATTR = 'data-diagram-action'
@@ -162,8 +162,15 @@ function makeWidget(code: string, lang: 'mermaid' | 'svg', pos: number): HTMLEle
   return wrap
 }
 
-function build(state: EditorState): DecorationSet {
+interface DiagramState {
+  decos: DecorationSet
+  /** 各图表代码块的文档区间，用于判断选区是否进出图表块（避免无谓重建） */
+  ranges: Array<[number, number]>
+}
+
+function build(state: EditorState): DiagramState {
   const decos: Decoration[] = []
+  const ranges: Array<[number, number]> = []
   const { from: selFrom, to: selTo } = state.selection
 
   state.doc.descendants((node, pos) => {
@@ -172,6 +179,7 @@ function build(state: EditorState): DecorationSet {
     if (!lang) return true
 
     const to = pos + node.nodeSize
+    ranges.push([pos, to])
     // 光标在块内 → 老老实实显示源码，让用户能改
     if (selFrom >= pos && selTo <= to) return false
 
@@ -189,7 +197,7 @@ function build(state: EditorState): DecorationSet {
     return false
   })
 
-  return DecorationSet.create(state.doc, decos)
+  return { decos: DecorationSet.create(state.doc, decos), ranges }
 }
 
 /**
@@ -204,21 +212,31 @@ function focusCodeBlock(view: EditorView, pos: number): void {
 }
 
 export const diagramPlugin = $prose(() => {
-  return new Plugin<DecorationSet>({
+  return new Plugin<DiagramState>({
     key: diagramPluginKey,
     state: {
       init: (_config, state) => build(state),
-      apply: (tr, value, _oldState, newState) => {
-        // 选区变化也要重算：光标进出代码块会切换"显示图 / 显示源码"
-        if (tr.docChanged || !tr.selection.eq(_oldState.selection) || tr.getMeta(diagramPluginKey)) {
+      apply: (tr, value, oldState, newState) => {
+        // 文档变化 / 主题 meta：全量重建
+        if (tr.docChanged || tr.getMeta(diagramPluginKey)) {
           return build(newState)
         }
-        return value.map(tr.mapping, tr.doc)
+        // 选区变化：仅当光标所在的图表块改变时才重建。无图表文档（ranges 空）
+        // 或光标仍在同一块/块外 → 零扫描，消除「光标每动一下全文档 descendants」
+        if (!tr.selection.eq(oldState.selection)) {
+          const blockIndex = (sel: { from: number; to: number }) =>
+            value.ranges.findIndex(([f, t]) => sel.from >= f && sel.to <= t)
+          if (blockIndex(tr.selection) !== blockIndex(oldState.selection)) {
+            return build(newState)
+          }
+          return value
+        }
+        return { ...value, decos: value.decos.map(tr.mapping, tr.doc) }
       },
     },
     props: {
       // 经 PluginKey 取 state，避免在初始化表达式里自引用造成循环类型推断
-      decorations: (state) => diagramPluginKey.getState(state) ?? DecorationSet.empty,
+      decorations: (state) => diagramPluginKey.getState(state)?.decos ?? DecorationSet.empty,
       // 点击图表 → 把光标放进被隐藏的代码块，进入编辑状态
       handleDOMEvents: {
         mousedown: (view, event) => {

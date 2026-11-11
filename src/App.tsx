@@ -15,6 +15,7 @@ import FindReplace from './components/FindReplace'
 import { prepareDiagrams } from './lib/diagram'
 import { renderMarkdown } from './lib/markdown'
 import { getDocDir } from './lib/imgSrc'
+import { parseOutline, findHeadingLine } from './lib/outline'
 import { copyDroppedImage, isImagePath } from './lib/imageInsert'
 import { DIAGRAM_ZOOM_EVENT, type DiagramZoomDetail } from './lib/diagramActions'
 import './App.css'
@@ -243,18 +244,56 @@ function App() {
     updateTab(tab.id, { viewState })
   }, [updateTab])
 
-  // 统一的切换标签路径：捕获离开状态 → 保存内容 → 激活目标标签 → 重建编辑器。
-  // 点击标签 / 打开已打开文件 / 侧边栏 / 拖放 / 滚轮切换都走这里
+  // 恢复 WYSIWYG 视图状态（选区 + 滚动）。图片/图表异步加载期间文档高度仍增长，
+  // scrollTop 会被夹紧——用 rAF 重写直到定位准确且高度稳定（上限约 1s 防空转）。
+  // 切标签（实例常驻）与编辑器重建就绪两条路径共用。
+  const restoreWysiwygViewState = useCallback((viewState: TabViewState | undefined, tabId: string) => {
+    const s = viewState?.wysiwyg
+    if (!s) return
+    if (s.selection) editorRef.current?.restoreSelectionSnapshot(s.selection)
+    const target = s.scrollTop
+    if (typeof target !== 'number' || target === 0) return
+    let tries = 0
+    let lastHeight = 0
+    let stableFrames = 0
+    const apply = () => {
+      const container = editorScrollRef.current
+      if (!container || activeTabIdRef.current !== tabId) return
+      container.scrollTop = target
+      const height = container.scrollHeight
+      stableFrames = height === lastHeight ? stableFrames + 1 : 0
+      lastHeight = height
+      const stuck = Math.abs(container.scrollTop - target) < 1
+      if ((stuck && stableFrames >= 5) || ++tries >= 60) return
+      requestAnimationFrame(apply)
+    }
+    requestAnimationFrame(apply)
+  }, [])
+
+  // 统一的切换标签路径：捕获离开状态 → 保存内容 → 激活目标标签。
+  // 两个都是 WYSIWYG 且编辑器就绪 → 实例常驻、换文档（无重建/无预览闪烁）；
+  // 否则（涉及源码模式/编辑器未就绪）走重建。点击/侧边栏/拖放/滚轮都走这里。
   const switchToTab = useCallback((tabId: string) => {
     if (tabId === activeTabIdRef.current) return
+    const fromTab = tabsRef.current.find((t) => t.id === activeTabIdRef.current)
+    const toTab = tabsRef.current.find((t) => t.id === tabId)
     captureViewState()
     saveCurrentEditorContent()
     setActiveTabId(tabId)
-    resetEditor()
-    // 查找面板与标签绑定（WYSIWYG 插件 state 随编辑器重建），切走即关闭
+    const handle = editorRef.current
+    if (handle?.ready && fromTab?.viewMode === 'wysiwyg' && toTab?.viewMode === 'wysiwyg') {
+      handle.setMarkdown(toTab.content, getDocDir(toTab.filePath))
+      handle.findSetQuery('', false) // 清掉上个标签残留的查找高亮
+      editorBaselineRef.current = readEditorMarkdown()
+      justLoadedRef.current = false
+      restoreWysiwygViewState(toTab.viewState, tabId)
+    } else {
+      resetEditor()
+    }
+    // 查找面板与标签绑定，切走即关闭
     setFindOpen(false)
     setFindShowReplace(false)
-  }, [captureViewState, saveCurrentEditorContent, resetEditor])
+  }, [captureViewState, saveCurrentEditorContent, resetEditor, readEditorMarkdown, restoreWysiwygViewState])
 
   useEffect(() => {
     document.body.setAttribute('data-theme', theme)
@@ -819,36 +858,11 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabId, activeTab?.viewMode])
 
-  // 编辑器重建就绪后精确恢复 WYSIWYG 的选区与滚动位置。选区恢复不触发
-  // markdownUpdated（无文档变更），不会误标 isDirty
+  // 编辑器重建就绪后精确恢复 WYSIWYG 视图状态。实例常驻的切标签路径在
+  // switchToTab 里直接调 restoreWysiwygViewState，不走这里（editorKey 未变）
   useEffect(() => {
     if (!editorReady || !activeTab || activeTab.viewMode !== 'wysiwyg') return
-    const s = activeTab.viewState?.wysiwyg
-    if (!s) return
-    if (s.selection) {
-      editorRef.current?.restoreSelectionSnapshot(s.selection)
-    }
-    const target = s.scrollTop
-    if (typeof target !== 'number' || target === 0) return
-    // Milkdown 初始渲染与图片/图表异步加载期间文档高度仍在增长，scrollTop
-    // 会被夹紧——用 rAF 重写直到定位准确且高度稳定（上限约 1s 防空转）
-    const tabId = activeTabIdRef.current
-    const el = editorScrollRef.current
-    let tries = 0
-    let lastHeight = 0
-    let stableFrames = 0
-    const apply = () => {
-      const container = editorScrollRef.current
-      if (!container || activeTabIdRef.current !== tabId) return
-      container.scrollTop = target
-      const height = container.scrollHeight
-      stableFrames = height === lastHeight ? stableFrames + 1 : 0
-      lastHeight = height
-      const stuck = Math.abs(container.scrollTop - target) < 1
-      if ((stuck && stableFrames >= 5) || ++tries >= 60) return
-      requestAnimationFrame(apply)
-    }
-    if (el) requestAnimationFrame(apply)
+    restoreWysiwygViewState(activeTab.viewState, activeTabIdRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorReady, editorKey])
 
@@ -1014,19 +1028,13 @@ function App() {
     ? ''
     : (activeTab.viewMode === 'source' ? activeTab.sourceContent : activeTab.content)
 
-  // 文档大纲标题（ATX 风格；代码块内的 # 不误判）
-  const outlineHeadings = useMemo(() => {
-    const out: Array<{ level: number; text: string }> = []
-    let inFence = false
-    for (const line of currentContent.split('\n')) {
-      const trimmed = line.trimStart()
-      if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; continue }
-      if (inFence) continue
-      const m = line.match(/^(#{1,6})\s+(.*)$/)
-      if (m) out.push({ level: m[1].length, text: m[2].replace(/\s+#+\s*$/, '').trim() })
-    }
-    return out
+  // 文档大纲：共享解析（parseOutline）+ 防抖 300ms，避免每次按键全文扫描
+  const [outlineContent, setOutlineContent] = useState(currentContent)
+  useEffect(() => {
+    const t = setTimeout(() => setOutlineContent(currentContent), 300)
+    return () => clearTimeout(t)
   }, [currentContent])
+  const outlineHeadings = useMemo(() => parseOutline(outlineContent), [outlineContent])
 
   // 大纲跳转：WYSIWYG 滚动到标题节点；源码模式定位到对应行
   const handleTocClick = useCallback((text: string) => {
@@ -1036,18 +1044,10 @@ function App() {
     }
     const ta = sourceTextareaRef.current
     if (!ta) return
-    const lines = ta.value.split('\n')
-    let inFence = false
-    let lineIdx = -1
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trimStart()
-      if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; continue }
-      if (inFence) continue
-      const m = lines[i].match(/^(#{1,6})\s+(.*)$/)
-      if (m && m[2].replace(/\s+#+\s*$/, '').trim() === text) { lineIdx = i; break }
-    }
+    const lineIdx = findHeadingLine(ta.value, text)
     if (lineIdx < 0) return
     ta.focus()
+    const lines = ta.value.split('\n')
     const start = lines.slice(0, lineIdx).join('\n').length + (lineIdx > 0 ? 1 : 0)
     ta.setSelectionRange(start, start)
     const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 22

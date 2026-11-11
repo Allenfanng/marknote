@@ -77,15 +77,17 @@ export default function Toolbar({
 
   useEffect(() => {
     if (!editor || disabled) return
-    const id = setInterval(() => {
+    const update = () => {
       try {
         const next = editor.getActiveState()
         setActive((prev) => (sameActive(prev, next) ? prev : next))
       } catch {
         // editor may not be ready
       }
-    }, 250)
-    return () => clearInterval(id)
+    }
+    update() // 初始计算一次
+    // 事件驱动：选区/文档变化时刷新，空闲零开销（替代固定 250ms 轮询）
+    return editor.subscribeState(update)
   }, [editor, disabled])
 
   // Close export / diagram menus on outside click

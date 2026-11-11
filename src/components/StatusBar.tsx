@@ -66,7 +66,13 @@ export default function StatusBar({ content, fontSize, tabId }: StatusBarProps) 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- 标签切换时一次性重置，非级联
   useEffect(() => { setSelectionText('') }, [tabId])
 
-  const stats = useMemo(() => countStats(content), [content])
+  // 字数统计防抖 300ms：避免每次按键全文跑多趟正则（大文档输入卡顿）
+  const [debouncedContent, setDebouncedContent] = useState(content)
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedContent(content), 300)
+    return () => clearTimeout(t)
+  }, [content])
+  const stats = useMemo(() => countStats(debouncedContent), [debouncedContent])
   const selectionWords = useMemo(
     () => (selectionText ? countStats(selectionText).words : null),
     [selectionText]

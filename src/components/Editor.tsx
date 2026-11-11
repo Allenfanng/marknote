@@ -41,7 +41,7 @@ import {
 import { Plugin, Selection, TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView, NodeView } from '@milkdown/kit/prose/view'
 import type { Node as PMNode } from '@milkdown/kit/prose/model'
-import { commandsCtx, editorViewCtx, type Editor as MilkdownEditor } from '@milkdown/kit/core'
+import { commandsCtx, editorViewCtx, parserCtx, type Editor as MilkdownEditor } from '@milkdown/kit/core'
 import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { diagramPlugin, diagramPluginKey } from '../lib/diagramPlugin'
 import { clearDiagramCache, setMermaidTheme } from '../lib/diagram'
@@ -136,6 +136,9 @@ export interface FindInfo {
 export interface EditorHandle {
   ready: boolean
   getMarkdown: () => string
+  /** 整体替换文档（切标签用）：不重建编辑器实例、不触发 markdownUpdated、不进 undo 历史。
+   *  docDir 一并同步，保证换文档后图片按新目录解析。 */
+  setMarkdown: (md: string, docDir?: string | null) => void
   toggleBold: () => void
   toggleItalic: () => void
   toggleStrikethrough: () => void
@@ -150,6 +153,8 @@ export interface EditorHandle {
   /** 插入带语言标注的图表代码块（mermaid / svg），模板内容会处于选中态 */
   insertDiagram: (lang: 'mermaid' | 'svg') => void
   getActiveState: () => ActiveState
+  /** 订阅激活态变化（选区/文档变更时触发）；返回取消订阅函数。供工具栏事件驱动刷新 */
+  subscribeState: (cb: () => void) => () => void
   /** 暴露 ProseMirror view，供表格边缘控件做坐标 ↔ 文档位置的换算 */
   getView: () => EditorView | null
   /** 当前选区快照（Selection.toJSON()），用于标签页切换时记忆位置 */
@@ -328,6 +333,8 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
   // 用 ref 让图片 nodeView / 粘贴插件总读到最新目录（新文档首次保存后即生效）
   const docDirRef = useRef(docDir)
   useEffect(() => { docDirRef.current = docDir }, [docDir])
+  // 工具栏激活态订阅者（事件驱动，见 crepe.on 的 selectionUpdated/updated）
+  const stateSubscribersRef = useRef(new Set<() => void>())
 
   // Tauri 注入的 CSP nonce 必须在建编辑器前取到：
   // 它挂在 index.html 自带的 <style> 上，随首屏 HTML 一起到达。
@@ -408,6 +415,10 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
       listener.markdownUpdated((_ctx, markdown) => {
         onChange(markdown)
       })
+      // 工具栏激活态事件驱动：选区/文档变化时通知订阅者，替代固定 250ms 轮询
+      const notify = () => { stateSubscribersRef.current.forEach((cb) => cb()) }
+      listener.selectionUpdated(notify)
+      listener.updated(notify)
     })
 
     crepeRef.current = crepe
@@ -433,6 +444,24 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
   useImperativeHandle(editorRef, () => ({
     ready: initialized,
     getMarkdown: () => crepeRef.current?.getMarkdown() ?? '',
+    setMarkdown: (md, docDir) => {
+      const editor = get()
+      if (!editor) return
+      // 先同步目录，再换文档：新文档的图片 nodeView 创建时即按新目录解析
+      if (docDir !== undefined) docDirRef.current = docDir
+      editor.action((ctx) => {
+        const parser = ctx.get(parserCtx)
+        const view = ctx.get(editorViewCtx)
+        const doc = parser(md)
+        if (!doc) return
+        // addToHistory:false → listener 跳过（不触发 markdownUpdated）、不进 undo 历史
+        const tr = view.state.tr
+          .replaceWith(0, view.state.doc.content.size, doc.content)
+          .setMeta('addToHistory', false)
+        tr.setSelection(TextSelection.atStart(tr.doc))
+        view.dispatch(tr)
+      })
+    },
     toggleBold: () => { get()?.action(callCommand(toggleStrongCommand.key)) },
     toggleItalic: () => { get()?.action(callCommand(toggleEmphasisCommand.key)) },
     toggleStrikethrough: () => { get()?.action(callCommand(toggleStrikethroughCommand.key)) },
@@ -641,6 +670,11 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
           blockquote: commands.call(isNodeSelectedCommand.key, blockquoteSchema.type(ctx)),
         }
       })
+    },
+
+    subscribeState: (cb) => {
+      stateSubscribersRef.current.add(cb)
+      return () => { stateSubscribersRef.current.delete(cb) }
     },
   }), [get, initialized])
 
