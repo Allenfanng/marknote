@@ -32,15 +32,14 @@ export default defineConfig({
           if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
             return 'vendor-react'
           }
-          // Milkdown is lazy-loaded — keep it in the async Editor chunk,
-          // not a shared chunk that would block first paint.
           if (id.includes('node_modules/lucide-react')) {
             return 'vendor-lucide'
           }
-          // mermaid 只在文档里出现图表时才动态加载，单独成块
-          if (id.includes('node_modules/mermaid') || id.includes('node_modules/katex')) {
-            return 'vendor-mermaid'
-          }
+          // mermaid / katex 不再强制命名合块：
+          //  - mermaid 由 diagram.ts 的 import('mermaid') 自然切成异步块，按需加载
+          //  - katex 随 Crepe latex 特性进 Editor 异步块
+          // 此前把两者合进 vendor-mermaid，而 latex 静态依赖 katex，导致该 3.35MB
+          // 块被入口静态引用 + modulepreload，懒加载失效、冷启动多加载 3.35MB。
         },
       },
     },

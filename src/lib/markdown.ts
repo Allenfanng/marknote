@@ -5,16 +5,11 @@
  *  - 渲染结果与编辑器（Milkdown/CommonMark）行为一致，不再各说各话
  *  - 链接/URL 由 markdown-it 的 validateLink 负责，javascript: 等默认拦截
  *  - ```svg 代码块就地渲染成内联 SVG；```mermaid 由调用方先经
- *    prepareDiagrams 渲染成 \uE000n\uE001 占位符，渲染后回填
+ *    prepareDiagrams 渲染成私用区占位符，渲染后回填
  */
 import MarkdownIt from 'markdown-it'
 import { escapeHtml, sanitizeSvg, diagramPlaceholderRegex } from './diagram'
 import { resolveImgSrc } from './imgSrc'
-
-/** 占位符（与 diagram.ts 共用同一套私用区字符） */
-export function diagramPlaceholder(index: number): string {
-  return `\uE000${index}\uE001`
-}
 
 const md: MarkdownIt = new MarkdownIt({
   html: false, // 不渲染原始 HTML 标签（防 XSS，与编辑器行为一致）

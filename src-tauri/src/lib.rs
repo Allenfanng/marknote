@@ -161,8 +161,13 @@ async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
         .await
         .map_err(|e| format!("Failed to read recent files: {}", e))?;
     let files: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
-    // 过滤已不存在（被删除/移动）的路径
-    Ok(files.into_iter().filter(|p| std::path::Path::new(p).exists()).collect())
+    // 过滤已不存在（被删除/移动）的路径，并按归一化路径去重
+    let mut seen = std::collections::HashSet::new();
+    Ok(files
+        .into_iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .filter(|p| seen.insert(normalize_path(p)))
+        .collect())
 }
 
 #[tauri::command]
@@ -183,7 +188,8 @@ async fn add_recent_file(app: tauri::AppHandle, path: String) -> Result<(), Stri
         Vec::new()
     };
 
-    files.retain(|p| p != &path);
+    let norm = normalize_path(&path);
+    files.retain(|p| normalize_path(p) != norm);
     files.insert(0, path);
     files.truncate(20);
 
@@ -338,6 +344,13 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// 归一化路径用于最近文件去重：统一斜杠；Windows 大小写不敏感。
+/// 此前精确字符串比较让同一文件的 `\` / `/` / `//` 写法重复占满 20 条上限。
+fn normalize_path(p: &str) -> String {
+    let s = p.replace('\\', "/");
+    if cfg!(target_os = "windows") { s.to_lowercase() } else { s }
 }
 
 /// Restore + focus the main window (used by single-instance & file-open paths).
@@ -547,4 +560,49 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_path_unifies_separators() {
+        assert_eq!(normalize_path(r"C:\Docs\A.md"), normalize_path("C:/Docs/A.md"));
+        assert_eq!(normalize_path(r"\\server\share\a.md"), normalize_path("//server/share/a.md"));
+    }
+
+    #[test]
+    fn normalize_path_case_insensitive_on_windows() {
+        if cfg!(target_os = "windows") {
+            assert_eq!(normalize_path(r"C:\Docs\A.md"), normalize_path("c:/docs/a.md"));
+        }
+    }
+
+    #[test]
+    fn recent_dedup_collapses_path_variants() {
+        // 模拟 add_recent_file：同一文件的多种写法去重后只留一条 + 另一个文件
+        let mut files = vec![
+            "C:/Docs/A.md".to_string(),
+            r"C:\Docs\A.md".to_string(),
+            "C:/Docs/B.md".to_string(),
+        ];
+        let incoming = r"C:\Docs\A.md".to_string();
+        let norm = normalize_path(&incoming);
+        files.retain(|p| normalize_path(p) != norm);
+        files.insert(0, incoming);
+        files.truncate(20);
+        assert_eq!(files.len(), 2);
+        assert_eq!(normalize_path(&files[0]), normalize_path("C:/Docs/A.md"));
+        assert_eq!(normalize_path(&files[1]), normalize_path("C:/Docs/B.md"));
+    }
+
+    #[test]
+    fn epoch_to_datetime_known_values() {
+        assert_eq!(epoch_to_datetime(0), (1970, 1, 1, 0, 0, 0));
+        // 2020-01-01 00:00:00 UTC
+        assert_eq!(epoch_to_datetime(1_577_836_800), (2020, 1, 1, 0, 0, 0));
+        // 2020-02-29 12:34:56 UTC（闰日）
+        assert_eq!(epoch_to_datetime(1_582_979_696), (2020, 2, 29, 12, 34, 56));
+    }
 }

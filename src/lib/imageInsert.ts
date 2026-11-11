@@ -7,10 +7,7 @@
  * 文档未保存（无目录）时退化为 base64 data URI。
  */
 import { invoke } from '@tauri-apps/api/core'
-
-function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
-}
+import { isTauri } from './env'
 
 function extFromMime(mime: string): string {
   const m: Record<string, string> = {

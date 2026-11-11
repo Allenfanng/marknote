@@ -24,6 +24,7 @@ const AUTO_SAVE_INTERVAL = 3 * 60 * 1000
 const FONT_SIZE_STORAGE_KEY = 'marknote-font-size'
 const DEFAULT_FONT_SIZE = 16
 const WIDTH_MODE_STORAGE_KEY = 'marknote-width-mode'
+const THEME_STORAGE_KEY = 'marknote-theme'
 
 export type WidthMode = 'narrow' | 'fluid'
 
@@ -34,6 +35,10 @@ function getInitialFontSize(): number {
 
 function getInitialWidthMode(): WidthMode {
   return localStorage.getItem(WIDTH_MODE_STORAGE_KEY) === 'fluid' ? 'fluid' : 'narrow'
+}
+
+function getInitialTheme(): 'light' | 'dark' {
+  return localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light'
 }
 
 let isFirstStartupFileOpen = true
@@ -61,6 +66,8 @@ async function getFileMtime(path: string): Promise<number | null> {
 interface SavedSession {
   activeTabId: string
   tabs: Array<{
+    /** 持久化 id：恢复时复用，activeTabId 才能匹配到正确标签（T1-5） */
+    id: string
     filePath: string | null
     content: string
     sourceContent: string
@@ -77,6 +84,7 @@ function serializeSession(tabs: Tab[], activeTabId: string): string {
       // 无文件且未修改的空白标签没有恢复价值
       .filter((t) => t.filePath !== null || t.isDirty)
       .map((t) => ({
+        id: t.id,
         filePath: t.filePath,
         content: t.content,
         sourceContent: t.sourceContent,
@@ -106,7 +114,7 @@ function App() {
   // useState initializer args are evaluated on every render — guard for the
   // empty-tabs state (all tabs closed).
   const [activeTabId, setActiveTabId] = useState(tabs[0]?.id ?? '')
-  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme)
   const editorRef = useRef<EditorHandle | null>(null)
   // editorHandle 提升为 state：渲染期读 ref.current 传 props 会让子组件
   // 拿到的引用过期（依赖别的 state 变化「碰巧」重渲染才刷新）
@@ -257,6 +265,11 @@ function App() {
     localStorage.setItem(WIDTH_MODE_STORAGE_KEY, widthMode)
   }, [widthMode])
 
+  // 主题持久化：与字号/显示模式一致，重启后保持上次选择
+  useEffect(() => {
+    localStorage.setItem(THEME_STORAGE_KEY, theme)
+  }, [theme])
+
   const toggleWidthMode = useCallback(() => {
     setWidthMode((prev) => (prev === 'narrow' ? 'fluid' : 'narrow'))
   }, [])
@@ -280,34 +293,26 @@ function App() {
       const res = await invoke<{ content: string; encoding: string }>('read_file', { path })
       const text = res.content
       const mtime = await getFileMtime(path)
-      let targetTabId: string | undefined
-      setTabs((prev) => {
-        const soleTab = prev.length === 1 ? prev[0] : null
-        if (
-          isFirstStartupFileOpen &&
-          soleTab &&
-          soleTab.filePath === null &&
-          !soleTab.isDirty
-        ) {
-          isFirstStartupFileOpen = false
-          targetTabId = soleTab.id
-          return [{ ...soleTab, filePath: path, content: text, sourceContent: text, encoding: res.encoding, lastMtimeMs: mtime }]
-        }
-        const newTab = createTab({
-          filePath: path,
-          content: text,
-          sourceContent: text,
-          encoding: res.encoding,
-          lastMtimeMs: mtime,
-        })
-        targetTabId = newTab.id
-        return [...prev, newTab]
-      })
+      // 决策与副作用都在 updater 外完成：StrictMode 会双调用 updater，其内必须纯
+      const snapshot = tabsRef.current
+      const soleTab = snapshot.length === 1 ? snapshot[0] : null
+      const shouldReplace =
+        isFirstStartupFileOpen && !!soleTab && soleTab.filePath === null && !soleTab.isDirty
+      if (shouldReplace) isFirstStartupFileOpen = false
+      const newTab = shouldReplace
+        ? null
+        : createTab({ filePath: path, content: text, sourceContent: text, encoding: res.encoding, lastMtimeMs: mtime })
+      const targetTabId = shouldReplace ? soleTab!.id : newTab!.id
+      setTabs((prev) =>
+        shouldReplace
+          ? prev.map((t) => (t.id === targetTabId ? { ...t, filePath: path, content: text, sourceContent: text, encoding: res.encoding, lastMtimeMs: mtime } : t))
+          : [...prev, newTab!],
+      )
       // 目标是另一个标签页（而非启动时替换唯一空白标签）才需要记住离开位置
-      if (targetTabId !== undefined && targetTabId !== activeTabIdRef.current) {
+      if (targetTabId !== activeTabIdRef.current) {
         captureViewState()
       }
-      setActiveTabId(targetTabId!)
+      setActiveTabId(targetTabId)
       resetEditor()
       invoke('add_recent_file', { path }).catch(console.error)
     } catch (e) {
@@ -320,7 +325,6 @@ function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const fileParam = params.get('file')
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 启动时一次性打开 URL 参数指定的文件
     if (fileParam) loadFile(fileParam)
   }, [loadFile])
 
@@ -332,11 +336,19 @@ function App() {
       if (!raw) return
       const parsed = JSON.parse(raw) as SavedSession
       if (!parsed?.tabs?.length) return
+      // 复用持久化 id 前先把计数器抬到最大 id 之后，避免后续新建标签撞号
+      for (const st of parsed.tabs) {
+        const n = Number(String(st.id ?? '').replace(/^tab-/, ''))
+        if (Number.isFinite(n) && n > tabIdCounter) tabIdCounter = n
+      }
       const restored: Tab[] = []
       for (const st of parsed.tabs) {
+        // 旧版会话不含 id：此时不覆盖，让 createTab 生成新 id（activeTabId 回退首个）
+        const idOverride = st.id ? { id: st.id } : {}
         if (!st.filePath) {
           // 从未保存过的新建文档：恢复草稿
           restored.push(createTab({
+            ...idOverride,
             content: st.content,
             sourceContent: st.sourceContent,
             isDirty: st.isDirty,
@@ -350,6 +362,7 @@ function App() {
           try {
             const res = await invoke<{ content: string; encoding: string }>('read_file', { path: st.filePath })
             restored.push(createTab({
+              ...idOverride,
               filePath: st.filePath,
               content: res.content,
               sourceContent: res.content,
@@ -364,6 +377,7 @@ function App() {
         } else {
           // dirty 文件：恢复草稿内容，保留未保存标记
           restored.push(createTab({
+            ...idOverride,
             filePath: st.filePath,
             content: st.content,
             sourceContent: st.sourceContent,
@@ -548,7 +562,7 @@ function App() {
       if (!tab) return
       const md = tab.viewMode === 'wysiwyg'
         ? (readEditorMarkdown() ?? tab.content)
-        : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
+        : tab.sourceContent
       const { text, blocks } = await prepareDiagrams(md)
       const html = renderMarkdown(text, blocks)
       const css = getExportCss()
@@ -565,7 +579,7 @@ function App() {
       if (!tab) return
       const md = tab.viewMode === 'wysiwyg'
         ? (readEditorMarkdown() ?? tab.content)
-        : (tab.viewMode === 'source' ? tab.sourceContent : tab.content)
+        : tab.sourceContent
       const { text, blocks } = await prepareDiagrams(md)
       const html = renderMarkdown(text, blocks)
       const css = getExportCss()
@@ -600,7 +614,7 @@ function App() {
       if (tab.viewMode === 'wysiwyg') {
         content = readEditorMarkdown() ?? tab.content
       } else {
-        content = tab.viewMode === 'source' ? tab.sourceContent : tab.content
+        content = tab.sourceContent
       }
 
       let path = tab.filePath
@@ -638,23 +652,17 @@ function App() {
   }, [captureViewState, saveCurrentEditorContent, resetEditor])
 
   const closeTab = useCallback((tabId: string) => {
-    setTabs((prev) => {
-      const idx = prev.findIndex((t) => t.id === tabId)
-      const newTabs = prev.filter((t) => t.id !== tabId)
-
-      if (tabId === activeTabIdRef.current) {
-        if (newTabs.length === 0) {
-          // All tabs closed — show the empty state instead of auto-creating one.
-          setActiveTabId('')
-        } else {
-          const newActiveIdx = Math.min(idx, newTabs.length - 1)
-          setActiveTabId(newTabs[newActiveIdx].id)
-        }
-        resetEditor()
-      }
-
-      return newTabs
-    })
+    const prev = tabsRef.current
+    const idx = prev.findIndex((t) => t.id === tabId)
+    if (idx < 0) return
+    const remaining = prev.filter((t) => t.id !== tabId)
+    // updater 只做纯过滤；激活态切换/重建等副作用放在外面（StrictMode 安全）
+    setTabs((p) => p.filter((t) => t.id !== tabId))
+    if (tabId === activeTabIdRef.current) {
+      // 全部关闭 → 空状态（不自动新建）；否则激活相邻标签
+      setActiveTabId(remaining.length === 0 ? '' : remaining[Math.min(idx, remaining.length - 1)].id)
+      resetEditor()
+    }
   }, [resetEditor])
 
   const handleTabClose = useCallback((tabId: string) => {
@@ -1150,7 +1158,7 @@ function App() {
                   textareaRef={sourceTextareaRef}
                 />
               )}
-              <StatusBar content={currentContent} fontSize={fontSize} />
+              <StatusBar content={currentContent} fontSize={fontSize} tabId={activeTabId} />
             </>
           )}
         </div>

@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react'
 interface StatusBarProps {
   content: string
   fontSize: number
+  /** 活动标签 id：切换标签时清空选中统计（而非每次输入都清） */
+  tabId: string
 }
 
 function countStats(text: string): { chars: number; words: number } {
@@ -43,7 +45,7 @@ declare global {
   }
 }
 
-export default function StatusBar({ content, fontSize }: StatusBarProps) {
+export default function StatusBar({ content, fontSize, tabId }: StatusBarProps) {
   const [selectionText, setSelectionText] = useState('')
   const [startupMs, setStartupMs] = useState(0)
 
@@ -59,9 +61,10 @@ export default function StatusBar({ content, fontSize }: StatusBarProps) {
     }
   }, [])
 
-  // Switching tabs rebuilds the editor — drop the stale selection.
+  // 切换标签时丢弃 stale 选中统计。依赖 tabId 而非 content：
+  // 依赖 content 会让每次输入都清空「已选 X 词」（T1-10）。
   // eslint-disable-next-line react-hooks/set-state-in-effect -- 标签切换时一次性重置，非级联
-  useEffect(() => { setSelectionText('') }, [content])
+  useEffect(() => { setSelectionText('') }, [tabId])
 
   const stats = useMemo(() => countStats(content), [content])
   const selectionWords = useMemo(

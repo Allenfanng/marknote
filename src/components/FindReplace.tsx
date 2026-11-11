@@ -90,28 +90,31 @@ export default function FindReplace({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // 查询变更：WYSIWYG 下发插件；源码模式本地算。
+  // 查询变更：WYSIWYG 下发插件（文档变化由插件自身重算，无需依赖 content）。
   // setState 均在 setTimeout 回调里（异步），非同步级联；规则静态报错，显式豁免
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (mode === 'wysiwyg') {
-      if (!editor || !editorReady) return
-      clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        editor.findSetQuery(query, caseSensitive)
-        setWysiwygInfo(editor.getFindState())
-      }, 200)
-      return () => clearTimeout(debounceRef.current)
-    }
+    if (mode !== 'wysiwyg' || !editor || !editorReady) return
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      editor.findSetQuery(query, caseSensitive)
+      setWysiwygInfo(editor.getFindState())
+    }, 200)
+    return () => clearTimeout(debounceRef.current)
+  }, [query, caseSensitive, mode, editor, editorReady])
+
+  // 源码模式：query / 大小写 / 正文任一变化都重算匹配（防抖 200ms）。
+  // 必须依赖 content：replaceOne 改正文后若不重算，会拿旧偏移替换错区间（T1-3）。
+  useEffect(() => {
+    if (mode !== 'source') return
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       const matches = computeMatches(content, query, caseSensitive)
       setSourceMatches(matches)
-      setSourceActive(0)
+      setSourceActive((prev) => (prev < matches.length ? prev : 0))
     }, 200)
     return () => clearTimeout(debounceRef.current)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, caseSensitive, mode, editor, editorReady])
+  }, [query, caseSensitive, mode, content])
 
   // WYSIWYG 匹配数在文档变化后刷新
   useEffect(() => {

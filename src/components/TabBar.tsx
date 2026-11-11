@@ -161,6 +161,8 @@ export default function TabBar({
               key={tab.id}
               className={`tab-item ${isActive ? 'active' : ''}${dragId === tab.id ? ' dragging' : ''}${dropTargetId === tab.id ? ' drop-target' : ''}`}
               onClick={() => onTabClick(tab.id)}
+              onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onTabClose(tab.id) } }}
+              onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
               onContextMenu={(e) => handleContextMenu(e, tab)}
               title={tab.filePath ?? '未命名'}
               draggable
@@ -230,7 +232,11 @@ export default function TabBar({
         <div
           ref={menuRef}
           className="tab-context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          style={{
+            // 视口边缘钳制：避免在窗口右/下缘右键时菜单溢出窗外
+            left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - 230)),
+            top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - 300)),
+          }}
         >
           <button
             className="context-menu-item"

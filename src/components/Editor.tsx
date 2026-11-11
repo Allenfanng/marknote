@@ -238,12 +238,14 @@ interface EditorInnerProps {
 }
 
 /** 图片 nodeView：把 attrs.src 的相对/本地路径解析成 asset:// URL 后再赋给 <img>。
- *  序列化用的是 attrs.src 原值，不受此渲染影响。 */
-function makeImageNodeView(docDir: string | null) {
+ *  序列化用的是 attrs.src 原值，不受此渲染影响。
+ *  docDir 用 ref 运行时读取：新文档首次保存后 docDir 由 null 变为真实目录，
+ *  闭包捕获旧值会让保存后插入的图片仍走兜底（T1-6）。 */
+function makeImageNodeView(docDirRef: React.RefObject<string | null>) {
   return (node: PMNode): NodeView => {
     const img = document.createElement('img')
     const apply = (n: PMNode) => {
-      img.src = resolveImgSrc(String(n.attrs.src ?? ''), docDir)
+      img.src = resolveImgSrc(String(n.attrs.src ?? ''), docDirRef.current)
       if (n.attrs.alt) img.alt = String(n.attrs.alt)
       else img.removeAttribute('alt')
       if (n.attrs.title) img.title = String(n.attrs.title)
@@ -263,8 +265,9 @@ function makeImageNodeView(docDir: string | null) {
   }
 }
 
-/** 粘贴图片：剪贴板二进制图片 → assets/ 落盘（或 data URI 兜底）→ 插入 image 节点 */
-function makeImagePastePlugin(docDir: string | null) {
+/** 粘贴图片：剪贴板二进制图片 → assets/ 落盘（或 data URI 兜底）→ 插入 image 节点。
+ *  docDir 同样用 ref 运行时读取，保证首次保存后立即落盘到正确目录。 */
+function makeImagePastePlugin(docDirRef: React.RefObject<string | null>) {
   return $prose(() => {
     return new Plugin({
       props: {
@@ -274,7 +277,7 @@ function makeImagePastePlugin(docDir: string | null) {
           event.preventDefault()
           void (async () => {
             for (const file of files) {
-              const src = await storePastedImage(file, docDir)
+              const src = await storePastedImage(file, docDirRef.current)
               if (!src) continue
               const type = view.state.schema.nodes.image
               if (!type) continue
@@ -321,6 +324,10 @@ async function writeClipboard(text: string) {
 
 function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerProps) {
   const crepeRef = useRef<Crepe | null>(null)
+  // docDir 运行时 ref：useEditor 工厂依赖 []，闭包会捕获首次挂载的旧值；
+  // 用 ref 让图片 nodeView / 粘贴插件总读到最新目录（新文档首次保存后即生效）
+  const docDirRef = useRef(docDir)
+  useEffect(() => { docDirRef.current = docDir }, [docDir])
 
   // Tauri 注入的 CSP nonce 必须在建编辑器前取到：
   // 它挂在 index.html 自带的 <style> 上，随首屏 HTML 一起到达。
@@ -394,8 +401,8 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
       .use(frontmatterNode)
       .use(diagramPlugin)
       .use(findPlugin)
-      .use($view(imageSchema.node, () => makeImageNodeView(docDir)))
-      .use(makeImagePastePlugin(docDir))
+      .use($view(imageSchema.node, () => makeImageNodeView(docDirRef)))
+      .use(makeImagePastePlugin(docDirRef))
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown) => {
@@ -589,16 +596,18 @@ function EditorInner({ defaultValue, onChange, editorRef, docDir }: EditorInnerP
       let count = 0
       get()?.action((ctx) => {
         const view = ctx.get(editorViewCtx)
+        const st = findPluginKey.getState(view.state)
+        if (!st || st.matches.length === 0) return
         const safe = replacement.replace(/\r?\n/g, ' ')
-        // 每替换一个，插件就重算一次 matches；总是替换 matches[0]，
-        // 直到不再有匹配（防御上限防死循环）
-        while (count < 10000) {
-          const st = findPluginKey.getState(view.state)
-          if (!st || st.matches.length === 0) break
-          const m = st.matches[0]
-          view.dispatch(view.state.tr.insertText(safe, m.from, m.to))
+        // 单事务内从后往前替换：高位先改不影响低位偏移，插件只重扫一次。
+        // 旧实现每匹配 dispatch 一次、每次全量重扫 → O(匹配数 × 文档大小)。
+        let tr = view.state.tr
+        for (let i = st.matches.length - 1; i >= 0; i--) {
+          const m = st.matches[i]
+          tr = tr.insertText(safe, m.from, m.to)
           count++
         }
+        view.dispatch(tr.scrollIntoView())
         view.focus()
       })
       return count

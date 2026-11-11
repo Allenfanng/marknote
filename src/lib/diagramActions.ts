@@ -6,6 +6,7 @@
  * 编辑器实例拖进 React 依赖里。
  */
 import { invoke } from '@tauri-apps/api/core'
+import { isTauri } from './env'
 
 /** 全屏查看器事件名；App 监听它并渲染 <DiagramViewer /> */
 export const DIAGRAM_ZOOM_EVENT = 'marknote:diagram-zoom'
@@ -15,10 +16,6 @@ export interface DiagramZoomDetail {
   svg: string
   /** 标题栏显示用，如「Mermaid 图表」 */
   title: string
-}
-
-function isTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
 /**
